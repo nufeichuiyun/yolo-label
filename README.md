@@ -441,3 +441,15 @@ sudo chown -R $USER:$USER .
 - [React](https://reactjs.org/) - UI 框架
 - [Ant Design](https://ant.design/) - UI 组件库
 - [Fabric.js](http://fabricjs.com/) - Canvas 库
+
+## 关于作者
+
+本项目由 **怒飞垂云** 开发维护。如果你在使用过程中遇到问题，或者对无人机、飞控开发等领域感兴趣，欢迎通过以下方式交流：
+
+- **个人博客**：[怒飞垂云 | 无人机知识库](http://www.nufeichuiyun.com/) — 分享飞控固件开发、无人机组装调试等原创教程
+- **QQ**：3500985284
+- **微信公众号**：扫码关注，获取更多技术分享
+
+<p align="center">
+  <img src="pictures/公众号.jpg" width="200" alt="怒飞垂云公众号">
+</p>
