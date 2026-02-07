@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  db:
+    image: postgres:15-alpine
+    container_name: yolo-label-db
+    environment:
+      POSTGRES_USER: yolo_label
+      POSTGRES_PASSWORD: yolo_label_password
+      POSTGRES_DB: yolo_label_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yolo_label"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis（用于缓存和任务队列）
+  redis:
+    image: redis:7-alpine
+    container_name: yolo-label-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端API服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yolo-label-backend
+    environment:
+      - DATABASE_URL=postgresql://yolo_label:yolo_label_password@db:5432/yolo_label_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-this-secret-key-in-production
+      - UPLOAD_DIR=/app/uploads
+      - ANNOTATION_DIR=/app/annotations
+      - MODEL_DIR=/app/models
+      - QT_QPA_PLATFORM=offscreen  # 禁用OpenCV的GUI功能
+      - DISPLAY=  # 禁用显示
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+      - annotations_data:/app/annotations
+      - models_data:/app/models
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 300
+
+  # Celery Worker（后台任务处理）
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yolo-label-celery-worker
+    environment:
+      - DATABASE_URL=postgresql://yolo_label:yolo_label_password@db:5432/yolo_label_db
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads
+      - ANNOTATION_DIR=/app/annotations
+      - MODEL_DIR=/app/models
+      - QT_QPA_PLATFORM=offscreen  # 禁用OpenCV的GUI功能
+      - DISPLAY=  # 禁用显示
+      # GPU支持（如果系统有NVIDIA GPU和nvidia-container-toolkit）
+      # 注意：需要先安装nvidia-container-toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+      - annotations_data:/app/annotations
+      - models_data:/app/models
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # GPU支持：使用deploy方式（Docker Compose v3.8+）
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # 使用容器内Python运行celery worker，YOLO11已内置在容器中
+    # 使用solo pool避免CUDA fork问题（因为concurrency=1，单进程即可）
+    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: yolo-label-frontend
+    # 不设置VITE_API_URL环境变量，让前端使用相对路径通过Vite代理访问后端
+    # Vite代理会优先使用backend服务名（Docker内部网络）
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    command: npm start
+    # 确保前端容器能访问backend服务
+    networks:
+      - default
+
+volumes:
+  postgres_data:
+  uploads_data:
+  annotations_data:
+  models_data:

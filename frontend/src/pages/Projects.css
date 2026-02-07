@@ -1,0 +1,22 @@
+.projects-layout {
+  min-height: 100vh;
+}
+
+.projects-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #001529;
+  color: white;
+  padding: 0 24px;
+}
+
+.header-title {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.projects-content {
+  padding: 24px;
+  background: #f0f2f5;
+}

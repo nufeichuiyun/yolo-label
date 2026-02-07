@@ -1,0 +1,19 @@
+version: '3.8'
+
+# 开发环境覆盖配置
+services:
+  backend:
+    environment:
+      - DEBUG=true
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+      - annotations_data:/app/annotations
+
+  frontend:
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules

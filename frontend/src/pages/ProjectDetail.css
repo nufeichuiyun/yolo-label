@@ -1,0 +1,18 @@
+.project-detail-layout {
+  min-height: 100vh;
+}
+
+.project-detail-header {
+  background: #001529;
+  color: white;
+  padding: 0 24px;
+}
+
+.project-detail-content {
+  padding: 24px;
+  background: #f0f2f5;
+}
+
+.stats-card {
+  margin-bottom: 24px;
+}

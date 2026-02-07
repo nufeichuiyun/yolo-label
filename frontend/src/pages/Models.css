@@ -1,0 +1,16 @@
+.models-layout {
+  min-height: 100vh;
+}
+
+.models-header {
+  background: #001529;
+  color: #fff;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+}
+
+.models-content {
+  padding: 24px;
+  background: #f0f2f5;
+}

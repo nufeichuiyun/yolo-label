@@ -1,0 +1,23 @@
+.users-layout {
+  min-height: 100vh;
+}
+
+.users-header {
+  background: #001529;
+  padding: 0 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+}
+
+.users-header .header-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: white;
+}
+
+.users-content {
+  padding: 24px;
+  background: #f0f2f5;
+}
