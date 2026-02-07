@@ -863,13 +863,14 @@ export default function Annotation() {
     })
     polygonPointMarkersRef.current = []
     
-    // 创建最终的多边形对象
+    // 创建最终的多边形对象（线宽按 zoom 反比，放大时保持视觉线宽不变）
+    const polygonBaseStroke = 2
     const polygon = new fabric.Polygon(localPoints, {
       left: minX,
       top: minY,
       fill: 'transparent',
       stroke: categoryColor,
-      strokeWidth: 2,
+      strokeWidth: Math.max(0.5, polygonBaseStroke / (canvas.getZoom() || 1)),
       selectable: true,
       evented: true,
       // 禁用缩放和旋转
@@ -882,6 +883,7 @@ export default function Annotation() {
       lockMovementX: isSegmentation, // 实例分割时禁用X方向移动
       lockMovementY: isSegmentation, // 实例分割时禁用Y方向移动
     })
+    ;(polygon as any)._baseStrokeWidth = polygonBaseStroke
     
     // 清除所有默认控制点，只保留自定义的顶点控制点
     polygon.controls = {}
@@ -1951,12 +1953,13 @@ export default function Annotation() {
           // 如果是实例分割，禁用整体移动
           const isSegmentation = annotationType === 'segmentation'
           
+          const polygonBaseStroke = 3
           const polygon = new fabric.Polygon(localPoints, {
             left: minX,
             top: minY,
             fill: 'transparent',
             stroke: categoryColor,
-            strokeWidth: 3, // 增加线宽，确保可见
+            strokeWidth: Math.max(0.5, polygonBaseStroke / (canvas.getZoom() || 1)),
             selectable: true,
             evented: true,
             // 禁用缩放和旋转
@@ -1969,6 +1972,7 @@ export default function Annotation() {
             lockMovementX: isSegmentation, // 实例分割时禁用X方向移动
             lockMovementY: isSegmentation, // 实例分割时禁用Y方向移动
           })
+          ;(polygon as any)._baseStrokeWidth = polygonBaseStroke
           
           console.log(`标注 ${index + 1} 多边形创建完成:`, {
             left: polygon.left,
@@ -2160,6 +2164,7 @@ export default function Annotation() {
             categoryColor: categoryColor
           })
           
+          const rectBaseStroke = 2
           const rect = new fabric.Rect({
             left: canvasLeft,
             top: canvasTop,
@@ -2167,20 +2172,22 @@ export default function Annotation() {
             height: canvasHeight,
             fill: 'transparent',
             stroke: categoryColor,
-            strokeWidth: 2,
-            strokeUniform: true, // 确保线宽不受缩放影响
+            strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
+            strokeUniform: true, // 确保线宽不受对象缩放影响
             selectable: true,
             evented: true,
           })
+          ;(rect as any)._baseStrokeWidth = rectBaseStroke
           
           // 重写 _setObjectScale 方法，确保缩放时线宽不变
           const originalSetObjectScale = (rect as any)._setObjectScale
           if (originalSetObjectScale) {
             (rect as any)._setObjectScale = function(scaleX: number, scaleY: number, by: string) {
               const result = originalSetObjectScale.call(this, scaleX, scaleY, by)
-              if (this.type === 'rect') {
+              if (this.type === 'rect' && this.canvas) {
+                const base = (this as any)._baseStrokeWidth ?? 2
                 this.set({
-                  strokeWidth: 2,
+                  strokeWidth: Math.max(0.5, base / this.canvas.getZoom()),
                   strokeUniform: true
                 })
               }
@@ -2389,17 +2396,23 @@ export default function Annotation() {
         uniformScaling: false, // 全局设置：允许任意缩放
       })
       
-      // 监听渲染前事件，确保所有矩形框的线宽正确
+      // 监听渲染前事件，确保所有矩形和多边形的线宽按 zoom 反比（放大时线不变粗）
       canvas.on('before:render', () => {
-        const objects = canvas.getObjects()
-        objects.forEach((obj) => {
+        const zoom = canvas.getZoom() || 1
+        canvas.getObjects().forEach((obj) => {
           if (obj.type === 'rect') {
             const rect = obj as fabric.Rect
-            // 强制设置线宽和strokeUniform，无论当前值是什么
+            const base = (rect as any)._baseStrokeWidth ?? 2
             rect.set({
-              strokeWidth: 2,
+              strokeWidth: Math.max(0.5, base / zoom),
               strokeUniform: true
-            }, false) // false 表示不触发事件，避免循环
+            }, false)
+            ;(rect as any)._baseStrokeWidth = base
+          } else if (obj.type === 'polygon') {
+            const poly = obj as fabric.Polygon
+            const base = (poly as any)._baseStrokeWidth ?? 3
+            poly.set('strokeWidth', Math.max(0.5, base / zoom), false)
+            ;(poly as any)._baseStrokeWidth = base
           }
         })
       })
@@ -2412,14 +2425,16 @@ export default function Annotation() {
         }
         const activeObject = e.selected?.[0] || canvas.getActiveObject()
         if (activeObject) {
+          const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
-            // 矩形：允许任意缩放，但保持线宽不变
+            const base = (activeObject as any)._baseStrokeWidth ?? 2
             activeObject.set({
               uniformScaling: false,
               lockUniScaling: false,
-              strokeWidth: 2,
-              strokeUniform: true // 确保线宽不受缩放影响
+              strokeWidth: Math.max(0.5, base / zoom),
+              strokeUniform: true
             })
+            ;(activeObject as any)._baseStrokeWidth = base
           } else if (activeObject.type === 'polygon') {
             // 多边形：禁用缩放，只允许移动和编辑顶点
             const polygon = activeObject as fabric.Polygon
@@ -2427,23 +2442,22 @@ export default function Annotation() {
             // 更新选中状态
             hasActivePolygonRef.current = true
             
-            // 获取项目类型，如果是实例分割，禁用整体移动
-            const currentProject = projectRef.current || project
-            const annotationType = currentProject?.annotation_type || 'detection'
-            const isSegmentation = annotationType === 'segmentation'
-            
-            // 先清除所有控制点
-            polygon.controls = {}
+            const polyBase = (polygon as any)._baseStrokeWidth ?? 3
             polygon.set({
-              hasControls: true, // 启用控制点显示
-              hasBorders: false, // 隐藏矩形包络线
+              strokeWidth: Math.max(0.5, polyBase / zoom),
+              hasControls: true,
+              hasBorders: false,
               lockRotation: true,
               lockScalingX: true,
               lockScalingY: true,
               lockUniScaling: true,
-              lockMovementX: isSegmentation, // 实例分割时禁用X方向移动
-              lockMovementY: isSegmentation, // 实例分割时禁用Y方向移动
+              lockMovementX: (projectRef.current || project)?.annotation_type === 'segmentation',
+              lockMovementY: (projectRef.current || project)?.annotation_type === 'segmentation',
             })
+            ;(polygon as any)._baseStrokeWidth = polyBase
+            
+            // 先清除所有控制点
+            polygon.controls = {}
             
             // 清除所有现有控制点并重新创建顶点控制点
             polygon.controls = {}
@@ -2629,38 +2643,37 @@ export default function Annotation() {
         }
         const activeObject = e.selected?.[0] || canvas.getActiveObject()
         if (activeObject) {
+          const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
-            // 矩形：允许任意缩放，但保持线宽不变
+            const base = (activeObject as any)._baseStrokeWidth ?? 2
             activeObject.set({
               uniformScaling: false,
               lockUniScaling: false,
-              strokeWidth: 2,
-              strokeUniform: true // 确保线宽不受缩放影响
+              strokeWidth: Math.max(0.5, base / zoom),
+              strokeUniform: true
             })
+            ;(activeObject as any)._baseStrokeWidth = base
           } else if (activeObject.type === 'polygon') {
             // 多边形：禁用缩放，只允许移动和编辑顶点
             const polygon = activeObject as fabric.Polygon
             
-            // 更新选中状态
             hasActivePolygonRef.current = true
             
-            // 获取项目类型，如果是实例分割，禁用整体移动
-            const currentProject = projectRef.current || project
-            const annotationType = currentProject?.annotation_type || 'detection'
-            const isSegmentation = annotationType === 'segmentation'
-            
-            // 先清除所有控制点
-            polygon.controls = {}
+            const polyBase = (polygon as any)._baseStrokeWidth ?? 3
             polygon.set({
-              hasControls: true, // 启用控制点显示
-              hasBorders: false, // 隐藏矩形包络线
+              strokeWidth: Math.max(0.5, polyBase / zoom),
+              hasControls: true,
+              hasBorders: false,
               lockRotation: true,
               lockScalingX: true,
               lockScalingY: true,
               lockUniScaling: true,
-              lockMovementX: isSegmentation, // 实例分割时禁用X方向移动
-              lockMovementY: isSegmentation, // 实例分割时禁用Y方向移动
+              lockMovementX: (projectRef.current || project)?.annotation_type === 'segmentation',
+              lockMovementY: (projectRef.current || project)?.annotation_type === 'segmentation',
             })
+            ;(polygon as any)._baseStrokeWidth = polyBase
+            
+            polygon.controls = {}
             
             // 清除所有现有控制点并重新创建顶点控制点
             polygon.controls = {}
@@ -2830,31 +2843,30 @@ export default function Annotation() {
         }
       })
       
-      // 监听对象缩放事件，确保矩形框的线宽保持不变
+      // 监听对象缩放事件，确保矩形框的线宽按 zoom 反比
       canvas.on('object:scaling', (e) => {
         const obj = e.target
-        if (obj && obj.type === 'rect') {
-          // 强制保持线宽不变（在缩放过程中持续保持）
+        if (obj && obj.type === 'rect' && obj.canvas) {
           const rect = obj as fabric.Rect
-          // 直接设置属性，不触发事件避免循环
+          const base = (rect as any)._baseStrokeWidth ?? 2
           rect.set({
-            strokeWidth: 2,
+            strokeWidth: Math.max(0.5, base / obj.canvas.getZoom()),
             strokeUniform: true
           }, false)
-          // 强制更新坐标和渲染
           rect.setCoords()
         }
       })
       
-      // 监听对象移动事件，确保矩形框的线宽保持不变
+      // 监听对象移动事件，确保矩形框的线宽按 zoom 反比
       canvas.on('object:moving', (e) => {
         const obj = e.target
-        if (obj && obj.type === 'rect') {
-          // 确保线宽设置正确
+        if (obj && obj.type === 'rect' && obj.canvas) {
           const rect = obj as fabric.Rect
-          if (rect.strokeWidth !== 2 || !rect.strokeUniform) {
+          const base = (rect as any)._baseStrokeWidth ?? 2
+          const want = Math.max(0.5, base / obj.canvas.getZoom())
+          if (Math.abs((rect.strokeWidth || 0) - want) > 0.01 || !rect.strokeUniform) {
             rect.set({
-              strokeWidth: 2,
+              strokeWidth: want,
               strokeUniform: true
             })
           }
@@ -2864,13 +2876,12 @@ export default function Annotation() {
       // 监听对象修改事件（包括缩放结束）
       canvas.on('object:modified', (e) => {
         const obj = e.target
-        if (obj && obj.type === 'rect') {
+        if (obj && obj.type === 'rect' && obj.canvas) {
           console.log('object:modified 事件触发，对象类型: rect')
-          
-          // 确保线宽和strokeUniform设置正确
           const rect = obj as fabric.Rect
+          const base = (rect as any)._baseStrokeWidth ?? 2
           rect.set({
-            strokeWidth: 2,
+            strokeWidth: Math.max(0.5, base / obj.canvas.getZoom()),
             strokeUniform: true
           })
           
@@ -4510,6 +4521,7 @@ export default function Annotation() {
             startPointRef.current = { x: pointer.x, y: pointer.y }
             const currentCategories = categoriesRef.current || []
             const categoryColor = currentCategories.find(c => c.id === currentSelectedCategory)?.color || '#FF0000'
+            const rectBaseStroke = 2
             const rect = new fabric.Rect({
               left: pointer.x,
               top: pointer.y,
@@ -4517,20 +4529,22 @@ export default function Annotation() {
               height: 0,
               fill: 'transparent',
               stroke: categoryColor,
-              strokeWidth: 2,
-              strokeUniform: true, // 确保线宽不受缩放影响
+              strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
+              strokeUniform: true, // 确保线宽不受对象缩放影响
               selectable: true,
               evented: true,
             })
+            ;(rect as any)._baseStrokeWidth = rectBaseStroke
             
             // 重写 _setObjectScale 方法，确保缩放时线宽不变
             const originalSetObjectScale = (rect as any)._setObjectScale
             if (originalSetObjectScale) {
               (rect as any)._setObjectScale = function(scaleX: number, scaleY: number, by: string) {
                 const result = originalSetObjectScale.call(this, scaleX, scaleY, by)
-                if (this.type === 'rect') {
+                if (this.type === 'rect' && this.canvas) {
+                  const base = (this as any)._baseStrokeWidth ?? 2
                   this.set({
-                    strokeWidth: 2,
+                    strokeWidth: Math.max(0.5, base / this.canvas.getZoom()),
                     strokeUniform: true
                   })
                 }
@@ -4630,6 +4644,15 @@ export default function Annotation() {
         // 以鼠标位置为中心进行缩放
         const pointer = canvas.getPointer(opt.e)
         canvas.zoomToPoint(pointer, zoom)
+        
+        // 缩放后按 zoom 反比更新标注线宽，使视觉线宽保持不变，便于放大时精细操作
+        const currentZoom = canvas.getZoom()
+        canvas.getObjects().forEach((obj: fabric.Object) => {
+          if (obj.type === 'rect' || obj.type === 'polygon') {
+            const base = (obj as any)._baseStrokeWidth ?? (obj.type === 'polygon' ? 3 : 2)
+            obj.set('strokeWidth', Math.max(0.5, base / currentZoom))
+          }
+        })
         
         // 缩放后刷新选中对象的控制点坐标，确保多边形顶点小圆点位置正确
         const activeObject = canvas.getActiveObject()
@@ -5145,6 +5168,7 @@ export default function Annotation() {
           isDrawingRef.current = true
           startPointRef.current = { x: pointer.x, y: pointer.y }
           const categoryColor = categories.find(c => c.id === selectedCategory)?.color || '#FF0000'
+          const rectBaseStroke = 2
           const rect = new fabric.Rect({
             left: pointer.x,
             top: pointer.y,
@@ -5152,11 +5176,12 @@ export default function Annotation() {
             height: 0,
             fill: 'transparent',
             stroke: categoryColor,
-            strokeWidth: 2,
-            strokeUniform: true, // 确保线宽不受缩放影响
+            strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
+            strokeUniform: true, // 确保线宽不受对象缩放影响
             selectable: true,
             evented: true,
           })
+          ;(rect as any)._baseStrokeWidth = rectBaseStroke
           rect.set({
             uniformScaling: false,
             lockUniScaling: false
