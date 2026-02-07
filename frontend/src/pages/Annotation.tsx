@@ -1003,31 +1003,24 @@ export default function Annotation() {
         cursorStyle: 'move',
       })
       
-      // 自定义位置处理器
-      // positionHandler 应该返回控制点在 canvas 上的绝对位置（Point 对象）
-      // 多边形的 points 是相对于左上角的局部坐标
-      control.positionHandler = function(dim: any, finalMatrix: any, fabricObject: fabric.Object) {
+      // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
+      control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
         const poly = fabricObject as fabric.Polygon
         const point = poly.points[index]
         if (!point) return { x: 0, y: 0 }
-        
-        // 获取 pathOffset（多边形路径的偏移量）
         const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-        
-        // 计算顶点在对象局部坐标系中的位置（相对于对象中心）
         const pointLocalX = point.x - pathOffset.x
         const pointLocalY = point.y - pathOffset.y
-        
-        // 使用 finalMatrix 将局部坐标转换为 canvas 坐标
-        // finalMatrix 已经包含了对象的变换（包括位置、缩放、旋转等）
-        const canvasPoint = fabric.util.transformPoint(
+        const canvas = (fabricObject as any).canvas
+        const vpt = canvas?.viewportTransform
+        const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+        const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+          ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+          : objMatrix
+        return fabric.util.transformPoint(
           { x: pointLocalX, y: pointLocalY },
-          finalMatrix
+          screenMatrix
         )
-        
-        // 调试日志（为所有顶点输出）
-        
-        return canvasPoint
       }
       
       polygon.controls[controlName] = control
@@ -2031,28 +2024,24 @@ export default function Annotation() {
               cursorStyle: 'move',
             })
             
-            // 自定义位置处理器
-            // 返回相对于对象中心的位置（归一化坐标，范围 -0.5 到 0.5）
-            // 多边形的 points 是相对于左上角的局部坐标
-            control.positionHandler = function(dim: any, finalMatrix: any, fabricObject: fabric.Object) {
+            // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
+            control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
               const poly = fabricObject as fabric.Polygon
               const point = poly.points[index]
               if (!point) return { x: 0, y: 0 }
-              
-              // 获取 pathOffset（多边形路径的偏移量）
               const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-              
-              // 计算顶点在对象局部坐标系中的位置（相对于对象中心）
               const pointLocalX = point.x - pathOffset.x
               const pointLocalY = point.y - pathOffset.y
-              
-              // 使用 finalMatrix 将局部坐标转换为 canvas 坐标
-              const canvasPoint = fabric.util.transformPoint(
+              const canvas = (fabricObject as any).canvas
+              const vpt = canvas?.viewportTransform
+              const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+              const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+                ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+                : objMatrix
+              return fabric.util.transformPoint(
                 { x: pointLocalX, y: pointLocalY },
-                finalMatrix
+                screenMatrix
               )
-              
-              return canvasPoint
             }
             
             polygon.controls[controlName] = control
@@ -2593,27 +2582,24 @@ export default function Annotation() {
                   cursorStyle: 'move',
                 })
                 
-                // 自定义位置处理器（与 finishPolygonDrawing 中的实现一致）
-                control.positionHandler = function(dim: any, finalMatrix: any, fabricObject: fabric.Object) {
+                // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
+                control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
                   const poly = fabricObject as fabric.Polygon
                   const point = poly.points[index]
                   if (!point) return { x: 0, y: 0 }
-                  
-                  // 获取 pathOffset（多边形路径的偏移量）
                   const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-                  
-                  // 计算顶点在对象局部坐标系中的位置（相对于对象中心）
                   const pointLocalX = point.x - pathOffset.x
                   const pointLocalY = point.y - pathOffset.y
-                  
-                  // 使用 finalMatrix 将局部坐标转换为 canvas 坐标
-                  const canvasPoint = fabric.util.transformPoint(
+                  const cvs = (fabricObject as any).canvas
+                  const vpt = cvs?.viewportTransform
+                  const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+                  const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+                    ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+                    : objMatrix
+                  return fabric.util.transformPoint(
                     { x: pointLocalX, y: pointLocalY },
-                    finalMatrix
+                    screenMatrix
                   )
-                  
-                  
-                  return canvasPoint
                 }
                 
                 polygon.controls[controlName] = control
@@ -2813,27 +2799,24 @@ export default function Annotation() {
                   cursorStyle: 'move',
                 })
                 
-                // 自定义位置处理器（与 finishPolygonDrawing 中的实现一致）
-                control.positionHandler = function(dim: any, finalMatrix: any, fabricObject: fabric.Object) {
+                // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
+                control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
                   const poly = fabricObject as fabric.Polygon
                   const point = poly.points[index]
                   if (!point) return { x: 0, y: 0 }
-                  
-                  // 获取 pathOffset（多边形路径的偏移量）
                   const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-                  
-                  // 计算顶点在对象局部坐标系中的位置（相对于对象中心）
                   const pointLocalX = point.x - pathOffset.x
                   const pointLocalY = point.y - pathOffset.y
-                  
-                  // 使用 finalMatrix 将局部坐标转换为 canvas 坐标
-                  const canvasPoint = fabric.util.transformPoint(
+                  const cvs = (fabricObject as any).canvas
+                  const vpt = cvs?.viewportTransform
+                  const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+                  const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+                    ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+                    : objMatrix
+                  return fabric.util.transformPoint(
                     { x: pointLocalX, y: pointLocalY },
-                    finalMatrix
+                    screenMatrix
                   )
-                  
-                  
-                  return canvasPoint
                 }
                 
                 polygon.controls[controlName] = control
@@ -4647,6 +4630,13 @@ export default function Annotation() {
         // 以鼠标位置为中心进行缩放
         const pointer = canvas.getPointer(opt.e)
         canvas.zoomToPoint(pointer, zoom)
+        
+        // 缩放后刷新选中对象的控制点坐标，确保多边形顶点小圆点位置正确
+        const activeObject = canvas.getActiveObject()
+        if (activeObject) {
+          activeObject.setCoords()
+          canvas.renderAll()
+        }
         
         opt.e.preventDefault()
         opt.e.stopPropagation()
