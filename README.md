@@ -19,6 +19,16 @@
 - **Docker 部署**：一键启动，完全容器化，无需外部 conda/CUDA 环境
 - **GPU 加速**：自动检测并使用 NVIDIA GPU 加速推理，也支持 CPU 回退
 
+## 使用演示
+
+### 目标检测标注
+
+![目标检测标注示例](pictures/目标检测标注示例.gif)
+
+### 实例分割标注
+
+![实例分割标注示例](pictures/实例分割标注示例.gif)
+
 ## 技术栈
 
 | 层级 | 技术 |
@@ -450,6 +460,4 @@ sudo chown -R $USER:$USER .
 - **QQ**：3500985284
 - **微信公众号**：扫码关注，获取更多技术分享
 
-<p align="center">
-  <img src="pictures/公众号.jpg" width="200" alt="怒飞垂云公众号">
-</p>
+<img src="pictures/公众号.jpg" width="200" alt="怒飞垂云公众号">
