@@ -590,7 +590,7 @@ export default function ProjectDetail() {
     <Layout className="project-detail-layout">
       <Header className="project-detail-header">
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/projects')}>
+          <Button type="primary" icon={<ArrowLeftOutlined />} onClick={() => navigate('/projects')}>
             返回
           </Button>
           <span>{project?.name}</span>
@@ -620,6 +620,7 @@ export default function ProjectDetail() {
         <Card style={{ marginTop: 16 }}>
           <Space>
             <Button 
+              type="primary"
               icon={<RobotOutlined />}
               onClick={() => {
                 setModelsModalVisible(true)
@@ -633,12 +634,12 @@ export default function ProjectDetail() {
               icon={<RobotOutlined />} 
               onClick={handleOpenPreannotationModal}
               disabled={images.length === 0}
-              size="large"
             >
               AI预标注
             </Button>
             {taskHistory.length > 0 && (
               <Button 
+                type="primary"
                 icon={<HistoryOutlined />}
                 onClick={() => setTaskHistoryVisible(true)}
               >
@@ -654,13 +655,15 @@ export default function ProjectDetail() {
         </Card>
 
         <Card
-          title="类别管理"
-          extra={
-            (user?.role === 'super_admin' || user?.role === 'project_admin') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCategory}>
-                添加类别
-              </Button>
-            )
+          title={
+            <Space>
+              <span>类别管理</span>
+              {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCategory}>
+                  添加类别
+                </Button>
+              )}
+            </Space>
           }
           style={{ marginTop: 24 }}
         >
@@ -696,7 +699,6 @@ export default function ProjectDetail() {
                       <Space size="small" style={{ marginLeft: 4 }}>
                         <Button
                           type="text"
-                          size="small"
                           icon={<EditOutlined />}
                           onClick={() => handleEditCategory(cat)}
                           style={{ color: textColor, padding: '0 4px' }}
@@ -710,7 +712,6 @@ export default function ProjectDetail() {
                         >
                           <Button
                             type="text"
-                            size="small"
                             icon={<DeleteOutlined />}
                             onClick={(e) => e.stopPropagation()}
                             style={{ color: textColor, padding: '0 4px' }}
@@ -728,18 +729,20 @@ export default function ProjectDetail() {
         {/* 任务包管理 - 只有项目管理员和超级管理员可见 */}
         {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
           <Card
-            title="任务包管理"
-            extra={
-              <Button
-                onClick={() => {
-                  // 如果有任务包，使用项目设置的images_per_task；如果没有，使用0让用户输入
-                  const imagesPerTask = tasks.length > 0 ? (project?.images_per_task || 0) : 0
-                  setReassignImagesPerTask(imagesPerTask)
-                  setReassignModalVisible(true)
-                }}
-              >
-                {tasks.length > 0 ? '重新分配任务包' : '分配任务包'}
-              </Button>
+            title={
+              <Space>
+                <span>任务包管理</span>
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    const imagesPerTask = tasks.length > 0 ? (project?.images_per_task || 0) : 0
+                    setReassignImagesPerTask(imagesPerTask)
+                    setReassignModalVisible(true)
+                  }}
+                >
+                  {tasks.length > 0 ? '重新分配任务包' : '分配任务包'}
+                </Button>
+              </Space>
             }
             style={{ marginTop: 24 }}
           >
@@ -798,7 +801,6 @@ export default function ProjectDetail() {
                         {!record.annotator_id && (
                           <Button
                             type="link"
-                            size="small"
                             onClick={() => handleAssignTask(record)}
                           >
                             分配标注者
@@ -808,7 +810,6 @@ export default function ProjectDetail() {
                           <>
                             <Button
                               type="link"
-                              size="small"
                               onClick={() => handleAssignTask(record)}
                             >
                               重新分配
@@ -820,7 +821,7 @@ export default function ProjectDetail() {
                               okText="确定"
                               cancelText="取消"
                             >
-                              <Button type="link" size="small">
+                              <Button type="link">
                                 取消分配
                               </Button>
                             </Popconfirm>
@@ -836,15 +837,9 @@ export default function ProjectDetail() {
         )}
 
         <Card
-          title="图片列表"
-          style={{ marginTop: 24 }}
-          extra={
+          title={
             <Space>
-              {images.length > 0 && (
-                <Button icon={<DownloadOutlined />} onClick={handleExport}>
-                  导出YOLO格式
-                </Button>
-              )}
+              <span>图片列表</span>
               <Upload
                 beforeUpload={() => false} // 阻止自动上传
                 onChange={(info) => {
@@ -971,8 +966,14 @@ export default function ProjectDetail() {
                   {uploading ? '上传中...' : '上传图片'}
                 </Button>
               </Upload>
+              {images.length > 0 && (
+                <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>
+                  导出yolo格式数据集
+                </Button>
+              )}
             </Space>
           }
+          style={{ marginTop: 24 }}
         >
           <Table
             columns={columns}
@@ -1148,7 +1149,6 @@ export default function ProjectDetail() {
                 </div>
                 <Button
                   type="text"
-                  size="small"
                   icon={<CloseOutlined />}
                   onClick={() => {
                     setCurrentTask(null)
@@ -1324,7 +1324,6 @@ export default function ProjectDetail() {
                           {!record.is_default && (
                             <Button
                               type="link"
-                              size="small"
                               icon={<CheckOutlined />}
                               onClick={() => handleSetDefaultModel(record.id)}
                             >
@@ -1338,7 +1337,7 @@ export default function ProjectDetail() {
                             okText="确定"
                             cancelText="取消"
                           >
-                            <Button type="link" danger size="small" icon={<DeleteOutlined />}>
+                            <Button type="link" danger icon={<DeleteOutlined />}>
                               删除
                             </Button>
                           </Popconfirm>
@@ -1389,7 +1388,7 @@ export default function ProjectDetail() {
                       setUploadFile(null)
                     }}
                   >
-                    <Button icon={<UploadOutlined />}>选择文件</Button>
+                    <Button type="primary" icon={<UploadOutlined />}>选择文件</Button>
                   </Upload>
                   {uploadFile && (
                     <div style={{ marginTop: 8, color: '#666' }}>
