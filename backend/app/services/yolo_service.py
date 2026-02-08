@@ -239,54 +239,47 @@ class YOLOInferenceService:
                                 import cv2
                                 import numpy as np
                                 
-                                # 获取mask数据
-                                mask = masks.data[i].cpu().numpy()
-                                
-                                # 将mask调整到原始图片尺寸
-                                if hasattr(masks, 'orig_shape'):
-                                    mask_resized = cv2.resize(mask.astype(np.uint8), (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-                                else:
-                                    mask_resized = mask.astype(np.uint8)
-                                
-                                # 找到轮廓
-                                contours, _ = cv2.findContours(mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                
-                                if contours:
-                                    # 选择最大的轮廓
-                                    largest_contour = max(contours, key=cv2.contourArea)
+                                # 使用masks.xy获取原始图片坐标系下的多边形点
+                                # masks.xy已正确处理letterbox逆变换，避免直接resize mask导致的坐标偏移
+                                if hasattr(masks, 'xy') and i < len(masks.xy):
+                                    polygon_points = masks.xy[i]  # shape: (N, 2), 像素坐标
                                     
-                                    # 使用Douglas-Peucker算法简化轮廓
-                                    epsilon = 0.002 * cv2.arcLength(largest_contour, True)
-                                    simplified_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
-                                    
-                                    # 限制最大顶点数为15
-                                    max_points = 15
-                                    if len(simplified_contour) > max_points:
-                                        # 逐步增加epsilon直到顶点数<=15
-                                        epsilon_multipliers = [0.005, 0.01, 0.02, 0.05, 0.1]
-                                        for mult in epsilon_multipliers:
-                                            epsilon = mult * cv2.arcLength(largest_contour, True)
-                                            simplified_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
-                                            if len(simplified_contour) <= max_points:
-                                                break
+                                    if len(polygon_points) >= 3:
+                                        # 转换为OpenCV轮廓格式用于简化
+                                        contour = polygon_points.reshape(-1, 1, 2).astype(np.float32)
                                         
-                                        # 如果仍然超过15个顶点，强制限制
+                                        # 使用Douglas-Peucker算法简化轮廓
+                                        epsilon = 0.002 * cv2.arcLength(contour, True)
+                                        simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
+                                        
+                                        # 限制最大顶点数为15
+                                        max_points = 15
                                         if len(simplified_contour) > max_points:
-                                            # 均匀采样，保留15个顶点
-                                            step = len(simplified_contour) / max_points
-                                            indices = [int(i * step) for i in range(max_points)]
-                                            simplified_contour = simplified_contour[indices]
-                                    
-                                    # 转换为归一化坐标的points数组
-                                    points = []
-                                    for point in simplified_contour:
-                                        x_norm = float(point[0][0]) / img_width
-                                        y_norm = float(point[0][1]) / img_height
-                                        points.append([x_norm, y_norm])
-                                    
-                                    # 至少需要3个点才能形成多边形
-                                    if len(points) >= 3:
-                                        detection["polygon"] = {"points": points}
+                                            # 逐步增加epsilon直到顶点数<=15
+                                            epsilon_multipliers = [0.005, 0.01, 0.02, 0.05, 0.1]
+                                            for mult in epsilon_multipliers:
+                                                epsilon = mult * cv2.arcLength(contour, True)
+                                                simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
+                                                if len(simplified_contour) <= max_points:
+                                                    break
+                                            
+                                            # 如果仍然超过15个顶点，强制限制
+                                            if len(simplified_contour) > max_points:
+                                                # 均匀采样，保留15个顶点
+                                                step = len(simplified_contour) / max_points
+                                                indices = [int(j * step) for j in range(max_points)]
+                                                simplified_contour = simplified_contour[indices]
+                                        
+                                        # 转换为归一化坐标的points数组，并裁剪到[0,1]范围内
+                                        points = []
+                                        for point in simplified_contour:
+                                            x_norm = max(0.0, min(1.0, float(point[0][0]) / img_width))
+                                            y_norm = max(0.0, min(1.0, float(point[0][1]) / img_height))
+                                            points.append([x_norm, y_norm])
+                                        
+                                        # 至少需要3个点才能形成多边形
+                                        if len(points) >= 3:
+                                            detection["polygon"] = {"points": points}
                             except Exception as e:
                                 import traceback
                                 print(f"[WARNING] 转换mask到polygon失败: {e}")
@@ -409,65 +402,54 @@ class YOLOInferenceService:
                                 import cv2
                                 import numpy as np
                                 
-                                # 获取mask数据
-                                mask = masks.data[i].cpu().numpy()
-                                
-                                # 检查mask的尺寸
-                                mask_height, mask_width = mask.shape[:2]
-                                print(f"[DEBUG] 批量推理 - Mask尺寸: {mask_width}x{mask_height}, 图片尺寸: {img_width}x{img_height}")
-                                
-                                # 将mask调整到原始图片尺寸
-                                if mask_width != img_width or mask_height != img_height:
-                                    mask_resized = cv2.resize(mask.astype(np.uint8), (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-                                    print(f"[DEBUG] 批量推理 - Mask已调整尺寸: {mask_width}x{mask_height} -> {img_width}x{img_height}")
-                                else:
-                                    mask_resized = mask.astype(np.uint8)
-                                    print(f"[DEBUG] 批量推理 - Mask尺寸匹配，无需调整")
-                                
-                                # 找到轮廓
-                                contours, _ = cv2.findContours(mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                
-                                if contours:
-                                    # 选择最大的轮廓
-                                    largest_contour = max(contours, key=cv2.contourArea)
+                                # 使用masks.xy获取原始图片坐标系下的多边形点
+                                # masks.xy已正确处理letterbox逆变换，避免直接resize mask导致的坐标偏移
+                                if hasattr(masks, 'xy') and i < len(masks.xy):
+                                    polygon_points = masks.xy[i]  # shape: (N, 2), 像素坐标
                                     
-                                    # 使用Douglas-Peucker算法简化轮廓
-                                    epsilon = 0.002 * cv2.arcLength(largest_contour, True)
-                                    simplified_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
-                                    
-                                    # 限制最大顶点数为15
-                                    max_points = 15
-                                    if len(simplified_contour) > max_points:
-                                        # 逐步增加epsilon直到顶点数<=15
-                                        epsilon_multipliers = [0.005, 0.01, 0.02, 0.05, 0.1]
-                                        for mult in epsilon_multipliers:
-                                            epsilon = mult * cv2.arcLength(largest_contour, True)
-                                            simplified_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
-                                            if len(simplified_contour) <= max_points:
-                                                break
+                                    if len(polygon_points) >= 3:
+                                        # 转换为OpenCV轮廓格式用于简化
+                                        contour = polygon_points.reshape(-1, 1, 2).astype(np.float32)
                                         
-                                        # 如果仍然超过15个顶点，强制限制
+                                        # 使用Douglas-Peucker算法简化轮廓
+                                        epsilon = 0.002 * cv2.arcLength(contour, True)
+                                        simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
+                                        
+                                        # 限制最大顶点数为15
+                                        max_points = 15
                                         if len(simplified_contour) > max_points:
-                                            # 均匀采样，保留15个顶点
-                                            step = len(simplified_contour) / max_points
-                                            indices = [int(i * step) for i in range(max_points)]
-                                            simplified_contour = simplified_contour[indices]
-                                    
-                                    # 转换为归一化坐标的points数组
-                                    points = []
-                                    for point in simplified_contour:
-                                        x_norm = float(point[0][0]) / img_width
-                                        y_norm = float(point[0][1]) / img_height
-                                        points.append([x_norm, y_norm])
-                                    
-                                    # 至少需要3个点才能形成多边形
-                                    if len(points) >= 3:
-                                        detection["polygon"] = {"points": points}
-                                        print(f"[DEBUG] 批量推理 - 成功转换mask到polygon，顶点数: {len(points)}")
+                                            # 逐步增加epsilon直到顶点数<=15
+                                            epsilon_multipliers = [0.005, 0.01, 0.02, 0.05, 0.1]
+                                            for mult in epsilon_multipliers:
+                                                epsilon = mult * cv2.arcLength(contour, True)
+                                                simplified_contour = cv2.approxPolyDP(contour, epsilon, True)
+                                                if len(simplified_contour) <= max_points:
+                                                    break
+                                            
+                                            # 如果仍然超过15个顶点，强制限制
+                                            if len(simplified_contour) > max_points:
+                                                # 均匀采样，保留15个顶点
+                                                step = len(simplified_contour) / max_points
+                                                indices = [int(j * step) for j in range(max_points)]
+                                                simplified_contour = simplified_contour[indices]
+                                        
+                                        # 转换为归一化坐标的points数组，并裁剪到[0,1]范围内
+                                        points = []
+                                        for point in simplified_contour:
+                                            x_norm = max(0.0, min(1.0, float(point[0][0]) / img_width))
+                                            y_norm = max(0.0, min(1.0, float(point[0][1]) / img_height))
+                                            points.append([x_norm, y_norm])
+                                        
+                                        # 至少需要3个点才能形成多边形
+                                        if len(points) >= 3:
+                                            detection["polygon"] = {"points": points}
+                                            print(f"[DEBUG] 批量推理 - 成功转换mask到polygon，顶点数: {len(points)}")
+                                        else:
+                                            print(f"[WARNING] 批量推理 - Polygon点数不足（{len(points)} < 3），跳过")
                                     else:
-                                        print(f"[WARNING] 批量推理 - Polygon点数不足（{len(points)} < 3），跳过")
+                                        print(f"[WARNING] 批量推理 - masks.xy点数不足（{len(polygon_points)} < 3），跳过")
                                 else:
-                                    print(f"[WARNING] 批量推理 - 未找到轮廓")
+                                    print(f"[WARNING] 批量推理 - 未找到masks.xy数据")
                             except Exception as e:
                                 import traceback
                                 print(f"[WARNING] 批量推理 - 转换mask到polygon失败: {e}")
