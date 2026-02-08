@@ -87,7 +87,6 @@ yolo-label/
 ├── manage.sh               # 统一管理脚本（部署/重启/清理/离线打包等）
 ├── docker-compose.yml      # 基础 Docker Compose 配置
 ├── docker-compose.dev.yml  # 开发/测试环境覆盖配置
-├── .env.example            # 环境变量示例
 └── README.md               # 本文件
 ```
 
