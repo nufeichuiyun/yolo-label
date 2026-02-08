@@ -16,6 +16,7 @@
 - **AI 辅助标注**：集成 YOLO11 模型，支持自动预标注，大幅提升标注效率
 - **数据管理**：支持 YOLO 格式导入导出，多项目管理
 - **权限管理**：超级管理员、项目管理员、标注员三级权限体系
+- **团队协作**：适合 1~15 人标注团队，支持将项目拆分为多个任务包并行分配，多人同时标注
 - **Docker 部署**：一键启动，完全容器化，无需外部 conda/CUDA 环境
 - **GPU 加速**：自动检测并使用 NVIDIA GPU 加速推理，也支持 CPU 回退
 
@@ -83,37 +84,29 @@ yolo-label/
 │   ├── src/                # 源代码（页面、组件、API 等）
 │   ├── Dockerfile          # 前端镜像构建
 │   └── package.json        # Node 依赖
-├── docker-compose.yml      # 生产环境配置
-├── docker-compose.dev.yml  # 开发环境覆盖配置
-├── start.sh                # 启动脚本
-├── deploy-offline.sh       # 离线部署脚本
-├── package-for-offline.sh  # 离线打包脚本
+├── manage.sh               # 统一管理脚本（部署/重启/清理/离线打包等）
+├── docker-compose.yml      # 基础 Docker Compose 配置
+├── docker-compose.dev.yml  # 开发/测试环境覆盖配置
 ├── .env.example            # 环境变量示例
 └── README.md               # 本文件
 ```
 
 ---
 
-## 生产环境部署（推荐）
+## 快速开始
 
-一键部署脚本会自动完成所有配置工作：
+所有操作通过统一管理脚本 `manage.sh` 完成：
 
 ```bash
 git clone <repository-url>
 cd yolo-label
-./deploy.sh
+
+# 生产环境首次部署（交互式引导：Docker/GPU/密码/端口）
+./manage.sh prod deploy
+
+# 测试环境首次部署（默认配置，支持热重载）
+./manage.sh test deploy
 ```
-
-脚本会自动引导你完成：
-
-1. **检测/安装 Docker** — 未安装则自动安装
-2. **检测 GPU** — 如有 NVIDIA GPU，可选启用并自动安装 NVIDIA Container Toolkit
-3. **设置密码** — 交互式设置数据库密码、管理员密码，自动生成 JWT 密钥
-4. **配置端口** — 自动检测端口占用，推荐可用端口
-5. **构建和启动** — 生成生产配置，构建镜像，启动所有服务
-6. **健康检查** — 验证所有服务正常运行，输出部署总结
-
-> **支持重新运行**：再次执行 `./deploy.sh` 可选择保留数据重新部署或完全清除重新开始。
 
 ### 系统要求
 
@@ -121,44 +114,23 @@ cd yolo-label
 - **内存**：至少 2GB 可用
 - **磁盘**：至少 4GB 可用空间（首次构建镜像约需 17GB）
 
-### 部署后常用命令
+### 管理命令一览
 
-```bash
-# 查看所有服务日志
-docker-compose -f docker-compose.prod.yml logs -f
-
-# 查看服务状态
-docker-compose -f docker-compose.prod.yml ps
-
-# 停止服务（保留数据）
-docker-compose -f docker-compose.prod.yml down
-
-# 重启服务
-docker-compose -f docker-compose.prod.yml restart
-
-# 重新部署
-./deploy.sh
-```
-
----
-
-## 开发环境部署
-
-如需本地开发调试，使用开发环境启动脚本：
-
-```bash
-# 启动开发环境（支持热重载）
-./start.sh dev
-
-# 强制重新构建
-./start.sh dev --build
-```
-
-首次启动后初始化数据库：
-
-```bash
-docker exec -it yolo-label-backend python init_db.py
-```
+| 命令 | 说明 |
+|------|------|
+| `./manage.sh prod deploy` | 首次生产环境部署（完整交互式设置） |
+| `./manage.sh prod redeploy` | 重复生产环境部署（复用配置，可选保留/清除数据） |
+| `./manage.sh prod restart` | 生产环境重启 |
+| `./manage.sh prod clean` | 生产环境清理（删除容器、数据、配置） |
+| `./manage.sh test deploy` | 首次测试环境部署（默认配置，热重载） |
+| `./manage.sh test redeploy` | 重复测试环境部署 |
+| `./manage.sh test restart` | 测试环境重启 |
+| `./manage.sh test clean` | 测试环境清理 |
+| `./manage.sh offline package` | 离线环境打包 |
+| `./manage.sh offline deploy` | 离线环境部署（支持重复部署） |
+| `./manage.sh status` | 查看服务状态 |
+| `./manage.sh logs [服务名]` | 查看服务日志 |
+| `./manage.sh help` | 查看完整帮助 |
 
 ### 访问地址
 
@@ -168,7 +140,8 @@ docker exec -it yolo-label-backend python init_db.py
 | 后端 API | http://localhost:8000 |
 | API 文档 | http://localhost:8000/docs |
 
-**默认账号**：用户名 `admin`，密码见 `init_db.py` 初始化时的输出
+- **生产环境**：登录密码在部署时交互设置
+- **测试环境**：默认账号 `admin` / `admin123`
 
 ---
 
@@ -248,28 +221,14 @@ AI 预标注功能允许使用 YOLO11 模型自动为项目中的图片生成标
 
 适用于不联网的服务器环境。
 
-### 在源服务器上（联网）
-
 ```bash
-cd /path/to/yolo-label
+# 在联网服务器上打包（生成 /tmp/yolo-label-offline-*.tar.gz，约 6-8GB）
+./manage.sh offline package
 
-# 运行打包脚本，生成离线部署包
-./package-for-offline.sh
-
-# 生成文件位于 /tmp/yolo-label-offline-*.tar.gz（约 6-8GB）
-# 通过 U 盘、移动硬盘等方式传输到目标服务器
-```
-
-### 在目标服务器上（不联网）
-
-```bash
-# 解压部署包
+# 传输到目标服务器后解压运行
 tar -xzf yolo-label-offline-*.tar.gz
 cd yolo-label-offline-*
-
-# 运行部署脚本
-chmod +x deploy-offline.sh
-./deploy-offline.sh
+./deploy.sh    # 支持重复运行，自动处理已有部署
 ```
 
 > 目标服务器需要预先安装 Docker 和 Docker Compose。
@@ -323,37 +282,17 @@ docker run --rm -v afa-label_postgres_data:/data -v $(pwd):/backup \
 
 ## 开发说明
 
-### 开发环境
-
-开发环境采用混合模式，支持热重载：
+测试环境采用混合模式，代码通过 volume 挂载，前后端均支持热重载：
 
 ```bash
-./start.sh dev
-```
-
-- **前端**：Docker 容器运行，代码通过 volume 挂载，Vite 热重载
-- **后端**：Docker 容器运行，代码通过 volume 挂载，uvicorn --reload
-- **数据库 / Redis**：Docker 容器运行
-
-### 前端本地开发
-
-```bash
-cd frontend
-npm install
-npm start
-# 前端运行在 http://localhost:3000，支持热重载
+./manage.sh test deploy
 ```
 
 ### 数据库迁移
 
 ```bash
-# 进入后端容器
 docker exec -it yolo-label-backend bash
-
-# 创建迁移
 alembic revision --autogenerate -m "描述"
-
-# 应用迁移
 alembic upgrade head
 ```
 
@@ -363,7 +302,7 @@ alembic upgrade head
 
 ### 端口被占用
 
-检查端口占用情况，或修改 `docker-compose.yml` 中的端口映射：
+生产环境部署时脚本会自动检测端口冲突并推荐可用端口。手动检查：
 
 ```bash
 netstat -tulpn | grep -E '3000|8000|5432|6379'
@@ -371,20 +310,10 @@ netstat -tulpn | grep -E '3000|8000|5432|6379'
 
 ### 数据库连接失败
 
-确保 PostgreSQL 容器已正常启动：
-
 ```bash
-docker-compose ps
-docker-compose logs db
-```
-
-如果问题持续，尝试重建：
-
-```bash
-docker-compose down -v
-docker-compose up -d
-sleep 10
-docker exec -it yolo-label-backend python init_db.py
+./manage.sh status              # 查看服务状态
+./manage.sh logs db             # 查看数据库日志
+./manage.sh test redeploy       # 或重新部署
 ```
 
 ### GPU 不可用
@@ -418,12 +347,11 @@ sudo chown -R $USER:$USER .
 
 ## 生产环境建议
 
-1. **修改默认密码**：首次登录后立即修改 admin 密码
-2. **修改环境变量**：编辑 `.env` 文件，修改数据库密码和 SECRET_KEY
-3. **配置 HTTPS**：使用 Nginx 等反向代理配置 HTTPS
-4. **定期备份**：备份 PostgreSQL 数据库和 Docker volumes
-5. **监控资源**：监控 CPU、内存、GPU 使用情况
-6. **日志管理**：配置日志轮转和集中管理
+1. **使用 `prod deploy`**：部署时会交互式设置强密码和 JWT 密钥，无需手动修改配置文件
+2. **配置 HTTPS**：使用 Nginx 等反向代理配置 HTTPS
+3. **定期备份**：备份 PostgreSQL 数据库和 Docker volumes
+4. **监控资源**：监控 CPU、内存、GPU 使用情况
+5. **日志管理**：配置日志轮转和集中管理
 
 ---
 
