@@ -88,7 +88,7 @@ print_info()    { echo -e "  ${CYAN}ℹ${NC} $1"; }
 confirm_yes() {
     local prompt="$1"
     local answer
-    read -r -p "$(echo -e "  ${YELLOW}?${NC} ${prompt} [Y/n]: ")" answer
+    read -r -p "$(echo -e "  ${YELLOW}?${NC} ${prompt} [Y/n]（默认 Y）: ")" answer
     answer="${answer:-Y}"
     [[ "$answer" =~ ^[Yy]$ ]]
 }
@@ -97,7 +97,7 @@ confirm_yes() {
 confirm_no() {
     local prompt="$1"
     local answer
-    read -r -p "$(echo -e "  ${YELLOW}?${NC} ${prompt} [y/N]: ")" answer
+    read -r -p "$(echo -e "  ${YELLOW}?${NC} ${prompt} [y/N]（默认 N）: ")" answer
     answer="${answer:-N}"
     [[ "$answer" =~ ^[Yy]$ ]]
 }
@@ -159,12 +159,26 @@ is_port_in_use() {
     return 1
 }
 
-# 查找可用端口
+# 已分配端口列表（用于避免服务间端口冲突）
+ASSIGNED_PORTS=()
+
+# 检查端口是否已分配给本次部署的其他服务
+is_port_assigned() {
+    local port="$1"
+    for assigned in "${ASSIGNED_PORTS[@]}"; do
+        if [ "$assigned" = "$port" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 查找可用端口（同时排除系统占用和本次已分配端口）
 find_available_port() {
     local port="$1"
     local max_port=$((port + 100))
     while [ "$port" -le "$max_port" ]; do
-        if ! is_port_in_use "$port"; then
+        if ! is_port_in_use "$port" && ! is_port_assigned "$port"; then
             echo "$port"
             return 0
         fi
@@ -333,30 +347,25 @@ detect_gpu() {
     if confirm_yes "是否启用 GPU 加速（用于 AI 辅助标注）？"; then
         ENABLE_GPU=true
         if [ "$toolkit_installed" = false ]; then
-            print_warning "NVIDIA Container Toolkit 未安装"
-            if confirm_yes "是否自动安装 NVIDIA Container Toolkit？"; then
-                print_info "正在安装 NVIDIA Container Toolkit..."
-                # 清理可能损坏的旧源列表
-                sudo rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list
-                sudo rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-                curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-                    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null || true
-                curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-                    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-                    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-                sudo apt-get update -qq
-                sudo apt-get install -y -qq nvidia-container-toolkit
-                sudo nvidia-ctk runtime configure --runtime=docker
-                sudo systemctl restart docker
-                sleep 2
-                if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &>/dev/null 2>&1; then
-                    print_success "NVIDIA Container Toolkit 安装成功"
-                else
-                    print_warning "NVIDIA Container Toolkit 安装可能未完全生效"
-                    print_info "如果 GPU 功能不工作，请重启系统后重新运行部署脚本"
-                fi
+            print_info "NVIDIA Container Toolkit 未安装，正在自动安装..."
+            # 清理可能损坏的旧源列表
+            sudo rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list
+            sudo rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+            curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+                | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null || true
+            curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+                | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+                | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq nvidia-container-toolkit
+            sudo nvidia-ctk runtime configure --runtime=docker
+            sudo systemctl restart docker
+            sleep 2
+            if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &>/dev/null 2>&1; then
+                print_success "NVIDIA Container Toolkit 安装成功"
             else
-                print_warning "跳过安装 NVIDIA Container Toolkit，GPU 加速可能不可用"
+                print_warning "NVIDIA Container Toolkit 安装可能未完全生效"
+                print_info "如果 GPU 功能不工作，请重启系统后重新运行部署脚本"
             fi
         fi
         print_success "GPU 加速已启用"
@@ -422,50 +431,77 @@ EOF
     read -r -p "$(echo -e "  ${YELLOW}?${NC} 已保存好以上信息？按 Enter 继续...")"
 }
 
+# 交互式读取单个端口（带推荐、冲突提示、占用检查）
+# 用法: read_port "服务名" 默认端口
+# 结果写入 _PORT_RESULT 变量
+read_port() {
+    local service_name="$1"
+    local default_port="$2"
+    local rec_port chosen_port
+
+    rec_port=$(find_available_port "$default_port")
+    if [ "$rec_port" != "$default_port" ]; then
+        # 默认端口被占用，推荐替代端口
+        read -r -p "$(echo -e "  ${YELLOW}?${NC} ${service_name}端口（${default_port} 被占用，推荐 ${CYAN}${rec_port}${NC}，回车确认）: ")" chosen_port
+        chosen_port="${chosen_port:-$rec_port}"
+    else
+        read -r -p "$(echo -e "  ${YELLOW}?${NC} ${service_name}端口（默认 ${CYAN}${rec_port}${NC}，回车确认）: ")" chosen_port
+        chosen_port="${chosen_port:-$rec_port}"
+    fi
+
+    # 校验用户输入
+    is_port_in_use "$chosen_port" && print_warning "端口 ${chosen_port} 已被系统其他服务占用"
+    is_port_assigned "$chosen_port" && print_warning "端口 ${chosen_port} 与已选的其他服务端口重复！"
+    ASSIGNED_PORTS+=("$chosen_port")
+
+    _PORT_RESULT="$chosen_port"
+}
+
 configure_ports() {
     print_step "4/7" "配置服务端口"
 
     echo -e "  ${BOLD}检测端口占用情况：${NC}"
     echo ""
 
-    local ports=("$DEFAULT_FRONTEND_PORT:前端界面" "$DEFAULT_BACKEND_PORT:后端API" "$DEFAULT_DB_PORT:数据库" "$DEFAULT_REDIS_PORT:Redis")
-    for item in "${ports[@]}"; do
-        local port="${item%%:*}"
-        local desc="${item##*:}"
-        if is_port_in_use "$port"; then
-            print_warning "端口 ${port} (${desc}) 已被占用"
+    local has_conflict=false
+    local service_names=("前端界面" "后端API" "数据库" "Redis")
+    local default_ports=($DEFAULT_FRONTEND_PORT $DEFAULT_BACKEND_PORT $DEFAULT_DB_PORT $DEFAULT_REDIS_PORT)
+
+    for i in "${!default_ports[@]}"; do
+        if is_port_in_use "${default_ports[$i]}"; then
+            print_warning "端口 ${default_ports[$i]} (${service_names[$i]}) 已被占用"
+            has_conflict=true
         else
-            print_success "端口 ${port} (${desc}) 可用"
+            print_success "端口 ${default_ports[$i]} (${service_names[$i]}) 可用"
         fi
     done
 
     echo ""
-    if confirm_yes "是否使用默认端口配置？（如有端口被占用，建议选否自定义）"; then
+    local need_custom=false
+    if [ "$has_conflict" = true ]; then
+        # 有冲突：自动进入自定义模式
+        print_info "检测到端口冲突，将自动推荐可用端口"
+        need_custom=true
+    elif ! confirm_yes "所有默认端口均可用，是否直接使用？"; then
+        need_custom=true
+    fi
+
+    if [ "$need_custom" = true ]; then
+        echo ""
+        echo -e "  ${BOLD}请确认或修改各服务端口（直接回车使用推荐端口）：${NC}"
+        echo ""
+
+        ASSIGNED_PORTS=()
+
+        read_port "前端界面" $DEFAULT_FRONTEND_PORT; FRONTEND_PORT="$_PORT_RESULT"
+        read_port "后端 API" $DEFAULT_BACKEND_PORT;  BACKEND_PORT="$_PORT_RESULT"
+        read_port "数据库"   $DEFAULT_DB_PORT;       DB_PORT="$_PORT_RESULT"
+        read_port "Redis"    $DEFAULT_REDIS_PORT;     REDIS_PORT="$_PORT_RESULT"
+    else
         FRONTEND_PORT=$DEFAULT_FRONTEND_PORT
         BACKEND_PORT=$DEFAULT_BACKEND_PORT
         DB_PORT=$DEFAULT_DB_PORT
         REDIS_PORT=$DEFAULT_REDIS_PORT
-    else
-        echo ""
-        echo -e "  ${BOLD}请为每个服务指定端口（直接回车使用推荐端口）：${NC}"
-        echo ""
-
-        local rec_frontend rec_backend rec_db rec_redis
-        rec_frontend=$(find_available_port $DEFAULT_FRONTEND_PORT)
-        FRONTEND_PORT=$(read_input "前端界面端口" "$rec_frontend")
-        [[ $(is_port_in_use "$FRONTEND_PORT" && echo y) ]] && print_warning "端口 ${FRONTEND_PORT} 已被占用"
-
-        rec_backend=$(find_available_port $DEFAULT_BACKEND_PORT)
-        BACKEND_PORT=$(read_input "后端 API 端口" "$rec_backend")
-        [[ $(is_port_in_use "$BACKEND_PORT" && echo y) ]] && print_warning "端口 ${BACKEND_PORT} 已被占用"
-
-        rec_db=$(find_available_port $DEFAULT_DB_PORT)
-        DB_PORT=$(read_input "数据库端口" "$rec_db")
-        [[ $(is_port_in_use "$DB_PORT" && echo y) ]] && print_warning "端口 ${DB_PORT} 已被占用"
-
-        rec_redis=$(find_available_port $DEFAULT_REDIS_PORT)
-        REDIS_PORT=$(read_input "Redis 端口" "$rec_redis")
-        [[ $(is_port_in_use "$REDIS_PORT" && echo y) ]] && print_warning "端口 ${REDIS_PORT} 已被占用"
     fi
 
     echo ""
@@ -536,8 +572,7 @@ generate_compose_prod() {
 # yolo-label 生产环境配置（自动生成）
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
 # GPU 加速: ${ENABLE_GPU}
-version: '3.8'
-
+# 注：Compose V2 已弃用 version 字段，此处不再写入
 services:
   db:
     image: postgres:15-alpine
@@ -953,7 +988,8 @@ cmd_prod_deploy() {
         echo -e "    ${CYAN}2)${NC} 退出（建议使用 ${CYAN}./manage.sh prod redeploy${NC} 进行重复部署）"
         echo ""
         local choice
-        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2]: ")" choice
+        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2]（默认 2）: ")" choice
+        choice="${choice:-2}"
         case "$choice" in
             1)
                 if confirm_no "确定要删除所有数据吗？此操作不可恢复"; then
@@ -1037,12 +1073,13 @@ cmd_prod_redeploy() {
 
     echo ""
     echo -e "  ${BOLD}请选择重新部署方式：${NC}"
-    echo -e "    ${CYAN}1)${NC} 保留数据，重新构建并部署（推荐，用于更新代码）"
+    echo -e "    ${CYAN}1)${NC} 保留数据，重新构建并部署（${GREEN}推荐${NC}，用于更新代码）"
     echo -e "    ${CYAN}2)${NC} 清除数据，全新部署（${RED}删除所有数据${NC}）"
     echo -e "    ${CYAN}3)${NC} 退出"
     echo ""
     local choice
-    read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2/3]: ")" choice
+    read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2/3]（默认 1）: ")" choice
+    choice="${choice:-1}"
 
     case "$choice" in
         1)
@@ -1184,7 +1221,8 @@ cmd_test_deploy() {
         echo -e "    ${CYAN}2)${NC} 退出（建议使用 ${CYAN}./manage.sh test redeploy${NC} 进行重复部署）"
         echo ""
         local choice
-        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2]: ")" choice
+        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2]（默认 2）: ")" choice
+        choice="${choice:-2}"
         case "$choice" in
             1)
                 print_info "正在清除旧部署..."
@@ -1245,12 +1283,13 @@ cmd_test_redeploy() {
 
     echo ""
     echo -e "  ${BOLD}请选择重新部署方式：${NC}"
-    echo -e "    ${CYAN}1)${NC} 保留数据，重新构建并部署（推荐）"
+    echo -e "    ${CYAN}1)${NC} 保留数据，重新构建并部署（${GREEN}推荐${NC}）"
     echo -e "    ${CYAN}2)${NC} 清除数据，全新部署（${RED}删除所有数据${NC}）"
     echo -e "    ${CYAN}3)${NC} 退出"
     echo ""
     local choice
-    read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2/3]: ")" choice
+    read -r -p "$(echo -e "  ${YELLOW}?${NC} 请输入选项 [1/2/3]（默认 1）: ")" choice
+    choice="${choice:-1}"
 
     case "$choice" in
         1)
@@ -1660,11 +1699,12 @@ cmd_offline_deploy() {
         print_warning "检测到已有的 yolo-label 容器："
         docker ps -a --format "table {{.Names}}\t{{.Status}}" 2>/dev/null | grep -E "(NAMES|yolo-label)" || true
         echo ""
-        echo -e "  ${CYAN}1)${NC} 保留数据，重新部署"
-        echo -e "  ${CYAN}2)${NC} 清除数据，全新部署"
+        echo -e "  ${CYAN}1)${NC} 保留数据，重新部署（${GREEN}推荐${NC}）"
+        echo -e "  ${CYAN}2)${NC} 清除数据，全新部署（${RED}删除所有数据${NC}）"
         echo -e "  ${CYAN}3)${NC} 退出"
         local choice
-        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请选择 [1/2/3]: ")" choice
+        read -r -p "$(echo -e "  ${YELLOW}?${NC} 请选择 [1/2/3]（默认 1）: ")" choice
+        choice="${choice:-1}"
         case "$choice" in
             1)
                 print_info "停止旧服务..."
