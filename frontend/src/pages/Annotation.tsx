@@ -2453,7 +2453,12 @@ export default function Annotation() {
               uniformScaling: false,
               lockUniScaling: false,
               strokeWidth: Math.max(0.5, base / zoom),
-              strokeUniform: true
+              strokeUniform: true,
+              // 设置控制点颜色，使其在浅色图片下更明显
+              cornerColor: '#1890ff', // 深蓝色填充
+              cornerStrokeColor: '#ffffff', // 白色边框
+              cornerSize: 12, // 控制点大小
+              transparentCorners: false // 使用填充而不是描边，更明显
             })
             ;(activeObject as any)._baseStrokeWidth = base
           } else if (activeObject.type === 'polygon') {
@@ -2678,7 +2683,12 @@ export default function Annotation() {
               uniformScaling: false,
               lockUniScaling: false,
               strokeWidth: Math.max(0.5, base / zoom),
-              strokeUniform: true
+              strokeUniform: true,
+              // 设置控制点颜色，使其在浅色图片下更明显
+              cornerColor: '#1890ff', // 深蓝色填充
+              cornerStrokeColor: '#ffffff', // 白色边框
+              cornerSize: 12, // 控制点大小
+              transparentCorners: false // 使用填充而不是描边，更明显
             })
             ;(activeObject as any)._baseStrokeWidth = base
           } else if (activeObject.type === 'polygon') {
