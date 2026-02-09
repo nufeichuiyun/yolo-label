@@ -1,6 +1,4 @@
-version: '3.8'
-
-# 开发环境覆盖配置
+# 开发/测试环境覆盖配置（与 docker-compose.yml 一起使用）
 services:
   backend:
     environment:
