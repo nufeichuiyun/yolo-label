@@ -77,6 +77,8 @@ export default function Annotation() {
   const saveCurrentAnnotationsRef = useRef<(() => Promise<void>) | null>(null)
   // 用于区分右键单击和拖动的状态
   const rightMouseDownPointRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  // 存储最后一次鼠标事件，用于在取消选中时重新显示十字辅助线
+  const lastMouseEventRef = useRef<MouseEvent | null>(null)
   const RIGHT_CLICK_THRESHOLD = 5 // 像素阈值，小于此值认为是单击
   const RIGHT_CLICK_TIME_THRESHOLD = 200 // 时间阈值（毫秒），小于此值认为是单击
   // 存储removeLastPolygonPoint函数的ref
@@ -2441,6 +2443,9 @@ export default function Annotation() {
         }
         const activeObject = e.selected?.[0] || canvas.getActiveObject()
         if (activeObject) {
+          // 选中对象时隐藏十字辅助线
+          hideCrosshair()
+          
           const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
             const base = (activeObject as any)._baseStrokeWidth ?? 2
@@ -2649,6 +2654,10 @@ export default function Annotation() {
         // 使用 setTimeout 延迟清除，确保 mouse:down 事件处理能够先检查状态
         setTimeout(() => {
           hasActivePolygonRef.current = false
+          // 取消选中时，如果有最后一次鼠标事件，重新显示十字辅助线
+          if (lastMouseEventRef.current && updateCrosshairNativeRef.current) {
+            updateCrosshairNativeRef.current(lastMouseEventRef.current)
+          }
         }, 0)
       })
       
@@ -2659,6 +2668,9 @@ export default function Annotation() {
         }
         const activeObject = e.selected?.[0] || canvas.getActiveObject()
         if (activeObject) {
+          // 选中对象时隐藏十字辅助线
+          hideCrosshair()
+          
           const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
             const base = (activeObject as any)._baseStrokeWidth ?? 2
@@ -3558,8 +3570,26 @@ export default function Annotation() {
         }
       }
       
+      // 隐藏十字辅助线的辅助函数
+      const hideCrosshair = () => {
+        if (crosshairHLineRef.current && canvas) {
+          canvas.remove(crosshairHLineRef.current)
+          crosshairHLineRef.current = null
+        }
+        if (crosshairVLineRef.current && canvas) {
+          canvas.remove(crosshairVLineRef.current)
+          crosshairVLineRef.current = null
+        }
+        if (canvas) {
+          canvas.renderAll()
+        }
+      }
+      
       // 更新十字辅助线（使用原生鼠标事件，确保实时跟踪）
       const updateCrosshairNative = (e: MouseEvent) => {
+        // 保存最后一次鼠标事件
+        lastMouseEventRef.current = e
+        
         // 取消之前的更新请求
         if (crosshairUpdateRequestRef.current !== null) {
           cancelAnimationFrame(crosshairUpdateRequestRef.current)
@@ -3572,19 +3602,24 @@ export default function Annotation() {
             return
           }
           
+          // 检查是否有选中的对象，如果有则隐藏十字辅助线
+          // 但是，如果正在绘制矩形（rectRef.current存在且isDrawingRef.current为true），则不应该隐藏十字辅助线
+          const activeObject = canvas.getActiveObject()
+          if (activeObject && (activeObject.type === 'rect' || activeObject.type === 'polygon')) {
+            // 如果正在绘制矩形，且activeObject就是正在绘制的矩形，不隐藏十字辅助线
+            if (isDrawingRef.current && rectRef.current && activeObject === rectRef.current) {
+              // 正在绘制中，继续显示十字辅助线
+            } else {
+              // 不是正在绘制，隐藏十字辅助线
+              hideCrosshair()
+              crosshairUpdateRequestRef.current = null
+              return
+            }
+          }
+          
           if (!canvas || !canvas.backgroundImage) {
           // 如果背景图片不存在，隐藏十字线
-          if (crosshairHLineRef.current && canvas) {
-            canvas.remove(crosshairHLineRef.current)
-            crosshairHLineRef.current = null
-          }
-          if (crosshairVLineRef.current && canvas) {
-            canvas.remove(crosshairVLineRef.current)
-            crosshairVLineRef.current = null
-          }
-          if (canvas) {
-            canvas.renderAll()
-          }
+          hideCrosshair()
           crosshairUpdateRequestRef.current = null
           return
         }
@@ -3594,17 +3629,7 @@ export default function Annotation() {
         const annotationType = currentProject?.annotation_type || 'detection'
         if (annotationType === 'segmentation') {
           // 如果是实例分割，隐藏十字线（如果存在）
-          if (crosshairHLineRef.current && canvas) {
-            canvas.remove(crosshairHLineRef.current)
-            crosshairHLineRef.current = null
-          }
-          if (crosshairVLineRef.current && canvas) {
-            canvas.remove(crosshairVLineRef.current)
-            crosshairVLineRef.current = null
-          }
-          if (canvas) {
-            canvas.renderAll()
-          }
+          hideCrosshair()
           crosshairUpdateRequestRef.current = null
           return
         }
@@ -3653,15 +3678,7 @@ export default function Annotation() {
         
         if (!isInsideImage) {
           // 鼠标不在图像范围内，隐藏十字线
-          if (crosshairHLineRef.current) {
-            canvas.remove(crosshairHLineRef.current)
-            crosshairHLineRef.current = null
-          }
-          if (crosshairVLineRef.current) {
-            canvas.remove(crosshairVLineRef.current)
-            crosshairVLineRef.current = null
-          }
-          canvas.renderAll()
+          hideCrosshair()
           crosshairUpdateRequestRef.current = null
           return
         }
@@ -4976,9 +4993,153 @@ export default function Annotation() {
           return
         }
         
-        // 如果正在绘制矩形，不处理
-        if (isDrawingRef.current) {
-          console.log('正在绘制矩形中，忽略mouse:down事件')
+        // 如果正在绘制矩形，第二次点击完成画框
+        if (isDrawingRef.current && startPointRef.current && rectRef.current) {
+          console.log('第二次点击，完成矩形绘制')
+          const pointer = canvas.getPointer(e.e)
+          // 更新矩形最终尺寸
+          const width = Math.abs(pointer.x - startPointRef.current.x)
+          const height = Math.abs(pointer.y - startPointRef.current.y)
+          rectRef.current.set({
+            width: width,
+            height: height,
+            left: Math.min(pointer.x, startPointRef.current.x),
+            top: Math.min(pointer.y, startPointRef.current.y),
+          })
+          canvas.renderAll()
+          
+          // 如果矩形太小，删除它
+          if (rectRef.current.width! < 5 || rectRef.current.height! < 5) {
+            console.log('矩形太小，删除它')
+            canvas.remove(rectRef.current)
+            rectRef.current = null
+          } else {
+            console.log('绘制完成，矩形尺寸:', rectRef.current.width, 'x', rectRef.current.height)
+            // 确保矩形可以被选择和交互
+            rectRef.current.set({
+              selectable: true,
+              evented: true
+            })
+            canvas.renderAll()
+            // 自动保存标注
+            console.log('完成矩形绘制，准备裁剪和保存')
+            
+            // 裁剪矩形到图片边界内
+            const currentProject = projectRef.current || project
+            const annotationType = currentProject?.annotation_type || 'detection'
+            if (annotationType === 'detection' && rectRef.current) {
+              const rect = rectRef.current
+              const bgImage = canvas.backgroundImage as fabric.Image
+              
+              if (bgImage && bgImage.width && bgImage.height) {
+                // 获取图片边界
+                const imageLeft = bgImage.left || 0
+                const imageTop = bgImage.top || 0
+                const imageWidth = bgImage.width * (bgImage.scaleX || 1)
+                const imageHeight = bgImage.height * (bgImage.scaleY || 1)
+                const imageRight = imageLeft + imageWidth
+                const imageBottom = imageTop + imageHeight
+                
+                // 获取矩形的实际边界框
+                const scaleX = rect.scaleX || 1
+                const scaleY = rect.scaleY || 1
+                const originX = rect.originX || 'left'
+                const originY = rect.originY || 'top'
+                const baseWidth = rect.width || 0
+                const baseHeight = rect.height || 0
+                const displayWidth = baseWidth * scaleX
+                const displayHeight = baseHeight * scaleY
+                
+                // 根据原点计算实际显示的左上角坐标
+                let actualLeft = rect.left || 0
+                let actualTop = rect.top || 0
+                
+                if (originX === 'center') {
+                  actualLeft = actualLeft - displayWidth / 2
+                } else if (originX === 'right') {
+                  actualLeft = actualLeft - displayWidth
+                }
+                
+                if (originY === 'center') {
+                  actualTop = actualTop - displayHeight / 2
+                } else if (originY === 'bottom') {
+                  actualTop = actualTop - displayHeight
+                }
+                
+                const rectLeft = actualLeft
+                const rectTop = actualTop
+                const rectRight = actualLeft + displayWidth
+                const rectBottom = actualTop + displayHeight
+                
+                // 首先检查矩形是否完全在图片外
+                const isCompletelyOutside = isRectCompletelyOutsideImage(rect, canvas)
+                
+                if (isCompletelyOutside) {
+                  console.log('绘制完成后：矩形完全在图片外，删除矩形')
+                  canvas.remove(rect)
+                  rectRef.current = null
+                  canvas.renderAll()
+                  // 恢复状态
+                  isDrawingRef.current = false
+                  startPointRef.current = null
+                  rectRef.current = null
+                  canvas.selection = true
+                  return
+                }
+                
+                // 计算裁剪后的边界
+                const clippedLeft = Math.max(rectLeft, imageLeft)
+                const clippedTop = Math.max(rectTop, imageTop)
+                const clippedRight = Math.min(rectRight, imageRight)
+                const clippedBottom = Math.min(rectBottom, imageBottom)
+                
+                // 检查是否需要裁剪（矩形部分超出图片边界）
+                const needsClip = clippedLeft > rectLeft || clippedTop > rectTop ||
+                                 clippedRight < rectRight || clippedBottom < rectBottom
+                
+                if (needsClip) {
+                  const clippedWidth = clippedRight - clippedLeft
+                  const clippedHeight = clippedBottom - clippedTop
+                  
+                  console.log('绘制完成后裁剪矩形')
+                  
+                  rect.set({
+                    left: clippedLeft,
+                    top: clippedTop,
+                    width: clippedWidth,
+                    height: clippedHeight,
+                    scaleX: 1,
+                    scaleY: 1,
+                    originX: 'left',
+                    originY: 'top'
+                  })
+                  rect.setCoords()
+                  canvas.renderAll()
+                }
+              }
+            }
+            
+            if (saveCurrentAnnotationsRef.current) {
+              saveCurrentAnnotationsRef.current().catch(error => {
+                console.error('完成矩形绘制后保存失败:', error)
+              })
+            } else {
+              setTimeout(() => {
+                if (saveCurrentAnnotationsRef.current) {
+                  saveCurrentAnnotationsRef.current().catch(error => {
+                    console.error('完成矩形绘制后保存失败:', error)
+                  })
+                }
+              }, 100)
+            }
+          }
+          
+          // 恢复状态
+          console.log('绘制完成，恢复选择功能')
+          canvas.selection = true
+          isDrawingRef.current = false
+          startPointRef.current = null
+          rectRef.current = null
           return
         }
         
