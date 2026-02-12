@@ -2194,6 +2194,7 @@ export default function Annotation() {
             strokeUniform: true, // 确保线宽不受对象缩放影响
             selectable: true,
             evented: true,
+            lockRotation: true, // 目标检测标注框不支持旋转
           })
           ;(rect as any)._baseStrokeWidth = rectBaseStroke
           
@@ -2217,10 +2218,11 @@ export default function Annotation() {
           ;(rect as any).categoryId = ann.category_id
           ;(rect as any).annotationId = ann.id
           
-          // 设置允许任意缩放，不保持宽高比
+          // 设置允许任意缩放，不保持宽高比；目标检测不支持旋转
           rect.set({
             uniformScaling: false,
-            lockUniScaling: false
+            lockUniScaling: false,
+            lockRotation: true
           })
           
           canvas.add(rect)
@@ -2452,6 +2454,7 @@ export default function Annotation() {
             activeObject.set({
               uniformScaling: false,
               lockUniScaling: false,
+              lockRotation: true, // 目标检测标注框不支持旋转
               strokeWidth: Math.max(0.5, base / zoom),
               strokeUniform: true,
               // 设置控制点颜色，使其在浅色图片下更明显
@@ -2461,6 +2464,11 @@ export default function Annotation() {
               transparentCorners: false // 使用填充而不是描边，更明显
             })
             ;(activeObject as any)._baseStrokeWidth = base
+            // 隐藏旋转锚点（目标检测不支持旋转）
+            activeObject.controls = {
+              ...(activeObject.controls || {}),
+              mtr: new fabric.Control({ visible: false })
+            }
           } else if (activeObject.type === 'polygon') {
             // 多边形：禁用缩放，只允许移动和编辑顶点
             const polygon = activeObject as fabric.Polygon
@@ -2682,6 +2690,7 @@ export default function Annotation() {
             activeObject.set({
               uniformScaling: false,
               lockUniScaling: false,
+              lockRotation: true, // 目标检测标注框不支持旋转
               strokeWidth: Math.max(0.5, base / zoom),
               strokeUniform: true,
               // 设置控制点颜色，使其在浅色图片下更明显
@@ -2691,6 +2700,11 @@ export default function Annotation() {
               transparentCorners: false // 使用填充而不是描边，更明显
             })
             ;(activeObject as any)._baseStrokeWidth = base
+            // 隐藏旋转锚点（目标检测不支持旋转）
+            activeObject.controls = {
+              ...(activeObject.controls || {}),
+              mtr: new fabric.Control({ visible: false })
+            }
           } else if (activeObject.type === 'polygon') {
             // 多边形：禁用缩放，只允许移动和编辑顶点
             const polygon = activeObject as fabric.Polygon
@@ -4576,7 +4590,8 @@ export default function Annotation() {
             }
             rect.set({
               uniformScaling: false,
-              lockUniScaling: false
+              lockUniScaling: false,
+              lockRotation: true, // 目标检测标注框不支持旋转
             })
             ;(rect as any).categoryId = currentSelectedCategory
             canvas.add(rect)
@@ -5351,7 +5366,8 @@ export default function Annotation() {
           ;(rect as any)._baseStrokeWidth = rectBaseStroke
           rect.set({
             uniformScaling: false,
-            lockUniScaling: false
+            lockUniScaling: false,
+            lockRotation: true, // 目标检测标注框不支持旋转
           })
           ;(rect as any).categoryId = selectedCategory
           canvas.add(rect)
