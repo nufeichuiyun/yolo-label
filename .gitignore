@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+*.pt
 *.py[cod]
 *$py.class
 *.so
@@ -56,6 +57,7 @@ docker-compose.prod.yml
 # 部署生成的敏感文件
 .credentials
 .deploy_record
+.test_env
 
 # Database
 *.db
