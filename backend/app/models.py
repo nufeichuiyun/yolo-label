@@ -60,6 +60,7 @@ class Project(Base):
     images = relationship("Image", back_populates="project", cascade="all, delete-orphan")
     project_users = relationship("ProjectUser", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
+    training_tasks = relationship("TrainingTask", back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectUser(Base):
@@ -179,6 +180,31 @@ class PreAnnotationTask(Base):
     # 关系
     project = relationship("Project")
     model = relationship("Model")
+    creator = relationship("User")
+
+
+class TrainingTask(Base):
+    """训练任务模型"""
+    __tablename__ = "training_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    base_model = Column(String(100), nullable=False)  # yolo11n.pt / yolo11n-seg.pt 等
+    task_id = Column(String(255), unique=True, index=True)  # Celery任务ID
+    status = Column(String(50), default="pending")  # pending, running, completed, failed
+    progress = Column(Integer, default=0)  # 进度百分比 0-100
+    epochs = Column(Integer, default=100)  # 总epoch数
+    current_epoch = Column(Integer, default=0)  # 当前epoch
+    train_images = Column(Integer, default=0)  # 训练集图片数
+    val_images = Column(Integer, default=0)  # 验证集图片数
+    error_message = Column(Text)  # 错误信息
+    output_model_path = Column(String(500))  # 输出模型路径（完成后）
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # 关系
+    project = relationship("Project", back_populates="training_tasks")
     creator = relationship("User")
 
 

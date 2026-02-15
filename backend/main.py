@@ -59,7 +59,7 @@ async def health():
     return {"status": "ok"}
 
 # 导入路由
-from app.routers import auth, projects, images, categories, annotations, stats, export, models, preannotation, tasks, users
+from app.routers import auth, projects, images, categories, annotations, stats, export, models, preannotation, tasks, users, training
 
 app.include_router(auth.router)
 app.include_router(projects.router)
@@ -72,6 +72,7 @@ app.include_router(models.router)
 app.include_router(preannotation.router)
 app.include_router(tasks.router)
 app.include_router(users.router)
+app.include_router(training.router)
 
 if __name__ == "__main__":
     import uvicorn

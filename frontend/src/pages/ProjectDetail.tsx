@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select } from 'antd'
-import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined } from '@ant-design/icons'
+import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { projectsApi, Project } from '../api/projects'
 import { imagesApi, Image } from '../api/images'
 import { statsApi, ProjectStats } from '../api/stats'
@@ -9,6 +9,7 @@ import { exportApi } from '../api/export'
 import { categoriesApi, Category } from '../api/categories'
 import { modelsApi, Model } from '../api/models'
 import { preannotationApi, PreAnnotationTask } from '../api/preannotation'
+import { trainingApi, TrainingTask } from '../api/training'
 import { tasksApi, Task } from '../api/tasks'
 import { usersApi, UserListResponse } from '../api/users'
 import { useAuth } from '../contexts/AuthContext'
@@ -70,6 +71,18 @@ export default function ProjectDetail() {
   const [selectedAnnotatorId, setSelectedAnnotatorId] = useState<number | null>(null)
   const [reassignModalVisible, setReassignModalVisible] = useState(false)
   const [reassignImagesPerTask, setReassignImagesPerTask] = useState<number>(0)
+  
+  // 训练相关状态
+  const [trainingModalVisible, setTrainingModalVisible] = useState(false)
+  const [trainingHistoryVisible, setTrainingHistoryVisible] = useState(false)
+  const [trainingHistory, setTrainingHistory] = useState<TrainingTask[]>([])
+  const [currentTrainingTask, setCurrentTrainingTask] = useState<TrainingTask | null>(null)
+  const [trainingPollingInterval, setTrainingPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
+  const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
+  const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16 })
+  const [startingTraining, setStartingTraining] = useState(false)
+  
   const { user } = useAuth()
 
   // 定义所有加载函数
@@ -230,6 +243,103 @@ export default function ProjectDetail() {
     setTaskPollingInterval(interval)
   }, [pollTaskStatus])
   
+  const loadBaseModels = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const data = await trainingApi.getBaseModels(Number(projectId))
+      setBaseModels(data.models)
+      setDefaultBaseModel(data.default)
+      setTrainingConfig(prev => ({ ...prev, base_model: data.default }))
+    } catch (error) {
+      console.error('加载基础模型失败:', error)
+    }
+  }, [projectId])
+
+  const loadTrainingHistory = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const tasks = await trainingApi.listProjectTasks(Number(projectId))
+      setTrainingHistory(tasks)
+      const runningTask = tasks.find(t => t.status === 'running')
+      if (runningTask) {
+        setCurrentTrainingTask(prev => (!prev || prev.id !== runningTask.id ? runningTask : prev))
+      }
+    } catch (error) {
+      console.error('加载训练历史失败:', error)
+    }
+  }, [projectId])
+
+  const pollTrainingStatus = useCallback(async (taskId: string) => {
+    try {
+      const task = await trainingApi.getTask(taskId)
+      setCurrentTrainingTask(task)
+      if (task.status === 'completed') {
+        setTrainingPollingInterval(prev => { if (prev) clearInterval(prev); return null })
+        message.success('模型训练已完成')
+        setCurrentTrainingTask(null)
+        setTimeout(() => {
+          if (projectId) {
+            loadTrainingHistory()
+            loadModels()
+          }
+        }, 100)
+      } else if (task.status === 'failed') {
+        setTrainingPollingInterval(prev => { if (prev) clearInterval(prev); return null })
+        message.error(`训练失败: ${task.error_message || '未知错误'}`)
+        setCurrentTrainingTask(null)
+      }
+    } catch (error) {
+      console.error('查询训练状态失败:', error)
+    }
+  }, [projectId])
+
+  const startTrainingPolling = useCallback((taskId: string) => {
+    setTrainingPollingInterval(prev => { if (prev) clearInterval(prev); return null })
+    pollTrainingStatus(taskId)
+    const interval = setInterval(() => pollTrainingStatus(taskId), 3000)
+    setTrainingPollingInterval(interval)
+  }, [pollTrainingStatus])
+
+  const handleStartTraining = async () => {
+    if (!trainingConfig.base_model) {
+      message.warning('请选择基础模型')
+      return
+    }
+    setStartingTraining(true)
+    try {
+      const task = await trainingApi.create({
+        project_id: Number(projectId),
+        base_model: trainingConfig.base_model,
+        epochs: trainingConfig.epochs,
+        imgsz: trainingConfig.imgsz,
+        batch: trainingConfig.batch,
+      })
+      message.success('训练任务已启动，将在后台执行')
+      setTrainingModalVisible(false)
+      setCurrentTrainingTask(task)
+      startTrainingPolling(task.task_id)
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '启动训练失败')
+    } finally {
+      setStartingTraining(false)
+    }
+  }
+
+  const handleOpenTrainingModal = () => {
+    setTrainingModalVisible(true)
+    loadBaseModels()
+  }
+
+  const handleDownloadTrainedModel = async (task: TrainingTask) => {
+    if (!task.output_model_path) return
+    try {
+      await trainingApi.downloadModel(task.task_id, task.output_model_path)
+      message.success('模型下载成功')
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '下载失败')
+    }
+  }
+
   const loadTaskHistory = useCallback(async () => {
     if (!projectId) return
     try {
@@ -258,6 +368,7 @@ export default function ProjectDetail() {
       loadCategories()
       loadModels()
       loadTaskHistory()
+      loadTrainingHistory()
       loadTasks()
       // 只有项目管理员和超级管理员需要加载标注者列表
       if (user?.role === 'super_admin' || user?.role === 'project_admin') {
@@ -272,6 +383,28 @@ export default function ProjectDetail() {
       startTaskPolling(currentTask.task_id)
     }
   }, [currentTask?.status, currentTask?.task_id, taskPollingInterval, startTaskPolling])
+
+  // 当currentTrainingTask变为running时，确保轮询已启动
+  useEffect(() => {
+    if (currentTrainingTask && currentTrainingTask.status === 'running' && !trainingPollingInterval) {
+      startTrainingPolling(currentTrainingTask.task_id)
+    }
+  }, [currentTrainingTask?.status, currentTrainingTask?.task_id, trainingPollingInterval, startTrainingPolling])
+
+  // 定期刷新训练历史（如果有运行中的任务）
+  useEffect(() => {
+    if (currentTrainingTask && currentTrainingTask.status === 'running') {
+      const interval = setInterval(() => loadTrainingHistory(), 5000)
+      return () => clearInterval(interval)
+    }
+  }, [currentTrainingTask?.status, projectId, loadTrainingHistory])
+
+  // 清理训练轮询
+  useEffect(() => {
+    return () => {
+      if (trainingPollingInterval) clearInterval(trainingPollingInterval)
+    }
+  }, [trainingPollingInterval])
   
   // 定期刷新任务历史（如果有运行中的任务）
   useEffect(() => {
@@ -616,7 +749,7 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {/* AI预标注功能区域 */}
+        {/* AI预标注与训练功能区域 */}
         <Card style={{ marginTop: 16 }}>
           <Space>
             <Button 
@@ -637,6 +770,16 @@ export default function ProjectDetail() {
             >
               AI预标注
             </Button>
+            {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
+              <Button 
+                type="primary" 
+                icon={<ThunderboltOutlined />} 
+                onClick={handleOpenTrainingModal}
+                disabled={!(stats && stats.annotated_images >= 10 && categories.length >= 2)}
+              >
+                开始训练
+              </Button>
+            )}
             {taskHistory.length > 0 && (
               <Button 
                 type="primary"
@@ -647,6 +790,20 @@ export default function ProjectDetail() {
                 {taskHistory.filter(t => t.status === 'running').length > 0 && (
                   <Tag color="processing" style={{ marginLeft: 4 }}>
                     {taskHistory.filter(t => t.status === 'running').length} 运行中
+                  </Tag>
+                )}
+              </Button>
+            )}
+            {(trainingHistory.length > 0 || currentTrainingTask) && (user?.role === 'super_admin' || user?.role === 'project_admin') && (
+              <Button 
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                onClick={() => setTrainingHistoryVisible(true)}
+              >
+                训练历史
+                {trainingHistory.filter(t => t.status === 'running').length > 0 && (
+                  <Tag color="processing" style={{ marginLeft: 4 }}>
+                    {trainingHistory.filter(t => t.status === 'running').length} 运行中
                   </Tag>
                 )}
               </Button>
@@ -1033,6 +1190,188 @@ export default function ProjectDetail() {
               />
             </div>
           </Space>
+        </Modal>
+
+        {/* 训练配置模态框 */}
+        <Modal
+          title="开始训练"
+          open={trainingModalVisible}
+          onCancel={() => setTrainingModalVisible(false)}
+          footer={null}
+          width={600}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>基础模型</div>
+              <Select
+                style={{ width: '100%' }}
+                value={trainingConfig.base_model || defaultBaseModel}
+                onChange={(v) => setTrainingConfig(prev => ({ ...prev, base_model: v }))}
+                options={baseModels}
+                placeholder="选择基础模型"
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>训练轮数 (epochs)</div>
+              <Input
+                type="number"
+                min={1}
+                max={1000}
+                value={trainingConfig.epochs}
+                onChange={(e) => setTrainingConfig(prev => ({ ...prev, epochs: Number(e.target.value) || 100 }))}
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>输入尺寸 (imgsz)</div>
+              <Input
+                type="number"
+                min={32}
+                max={1280}
+                value={trainingConfig.imgsz}
+                onChange={(e) => setTrainingConfig(prev => ({ ...prev, imgsz: Number(e.target.value) || 640 }))}
+              />
+            </div>
+            <div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>批次大小 (batch)</div>
+              <Input
+                type="number"
+                min={1}
+                max={128}
+                value={trainingConfig.batch}
+                onChange={(e) => setTrainingConfig(prev => ({ ...prev, batch: Number(e.target.value) || 16 }))}
+              />
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => setTrainingModalVisible(false)}>取消</Button>
+                <Button
+                  type="primary"
+                  onClick={handleStartTraining}
+                  loading={startingTraining}
+                  disabled={!trainingConfig.base_model && !defaultBaseModel}
+                >
+                  开始训练
+                </Button>
+              </Space>
+            </div>
+          </Space>
+        </Modal>
+
+        {/* 训练进度浮层 */}
+        {currentTrainingTask && currentTrainingTask.status === 'running' && (
+          <Card
+            style={{
+              position: 'fixed',
+              bottom: 20,
+              right: 20,
+              width: 420,
+              zIndex: 1000,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+              borderRadius: 8,
+              border: '1px solid #e8e8e8',
+            }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ThunderboltOutlined style={{ color: '#1890ff', fontSize: 18 }} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 16 }}>模型训练任务</div>
+                    <div style={{ fontSize: '12px', color: '#999', marginTop: 2 }}>
+                      {new Date(currentTrainingTask.created_at).toLocaleString('zh-CN')}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  type="text"
+                  icon={<CloseOutlined />}
+                  onClick={() => {
+                    setCurrentTrainingTask(null)
+                    if (trainingPollingInterval) {
+                      clearInterval(trainingPollingInterval)
+                      setTrainingPollingInterval(null)
+                    }
+                  }}
+                />
+              </div>
+              <div>
+                <Progress
+                  percent={currentTrainingTask.progress}
+                  status="active"
+                  strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
+                  showInfo
+                  format={(p) => `${p}%`}
+                />
+                <div style={{ fontSize: '13px', color: '#666', marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Epoch {currentTrainingTask.current_epoch} / {currentTrainingTask.epochs}</span>
+                  <Tag color="processing">训练中...</Tag>
+                </div>
+              </div>
+            </Space>
+          </Card>
+        )}
+
+        {/* 训练历史模态框 */}
+        <Modal
+          title={<Space><ThunderboltOutlined /><span>训练历史</span></Space>}
+          open={trainingHistoryVisible}
+          onCancel={() => setTrainingHistoryVisible(false)}
+          footer={null}
+          width={800}
+        >
+          <List
+            dataSource={trainingHistory}
+            renderItem={(task) => {
+              const statusConfig: Record<string, { color: string; text: string }> = {
+                pending: { color: 'default', text: '等待中' },
+                running: { color: 'processing', text: '运行中' },
+                completed: { color: 'success', text: '已完成' },
+                failed: { color: 'error', text: '失败' },
+              }
+              const config = statusConfig[task.status] || statusConfig.pending
+              return (
+                <List.Item
+                  actions={task.status === 'completed' && task.output_model_path ? [
+                    <Button key="download" type="link" onClick={() => handleDownloadTrainedModel(task)}>
+                      下载模型
+                    </Button>
+                  ] : []}
+                >
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color={config.color}>{config.text}</Tag>
+                        <span>任务 #{task.id}</span>
+                        <span style={{ fontSize: '12px', color: '#999' }}>{task.base_model}</span>
+                      </Space>
+                    }
+                    description={
+                      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                        <div>创建时间: {new Date(task.created_at).toLocaleString('zh-CN')}</div>
+                        {(task.status === 'running' || task.status === 'completed') && (
+                          <Progress
+                            percent={task.progress}
+                            status={task.status === 'failed' ? 'exception' : 'success'}
+                            size="small"
+                            format={() => `Epoch ${task.current_epoch}/${task.epochs}`}
+                          />
+                        )}
+                        {task.status === 'completed' && (
+                          <div style={{ color: '#52c41a', fontSize: '12px' }}>
+                            训练集 {task.train_images} 张，验证集 {task.val_images} 张
+                          </div>
+                        )}
+                        {task.status === 'failed' && task.error_message && (
+                          <div style={{ color: '#ff4d4f', fontSize: '12px' }}>错误: {task.error_message}</div>
+                        )}
+                      </Space>
+                    }
+                  />
+                </List.Item>
+              )
+            }}
+            locale={{ emptyText: '暂无训练历史' }}
+          />
         </Modal>
 
         {/* AI预标注模态框 */}
