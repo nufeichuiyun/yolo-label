@@ -89,6 +89,8 @@ export default function Annotation() {
   const updatePointMarkersRef = useRef<(() => void) | null>(null)
   // 用于跟踪当前是否有选中的多边形
   const hasActivePolygonRef = useRef<boolean>(false)
+  // 用于跟踪当前是否有选中的标注（矩形或多边形），点击空白时用于取消选择
+  const hasActiveAnnotationRef = useRef<boolean>(false)
 
   // 更新预览图片列表（当前图片前后各5张）
   const updatePreviewImages = useCallback((images: Image[], currentImageId: number) => {
@@ -2452,6 +2454,7 @@ export default function Annotation() {
           
           const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
+            hasActiveAnnotationRef.current = true
             const base = (activeObject as any)._baseStrokeWidth ?? 2
             activeObject.set({
               uniformScaling: false,
@@ -2478,6 +2481,7 @@ export default function Annotation() {
             
             // 更新选中状态
             hasActivePolygonRef.current = true
+            hasActiveAnnotationRef.current = true
             
             const polyBase = (polygon as any)._baseStrokeWidth ?? 3
             polygon.set({
@@ -2670,6 +2674,7 @@ export default function Annotation() {
         // 使用 setTimeout 延迟清除，确保 mouse:down 事件处理能够先检查状态
         setTimeout(() => {
           hasActivePolygonRef.current = false
+          hasActiveAnnotationRef.current = false
           // 取消选中时，如果有最后一次鼠标事件，重新显示十字辅助线
           if (lastMouseEventRef.current && updateCrosshairNativeRef.current) {
             updateCrosshairNativeRef.current(lastMouseEventRef.current)
@@ -2689,6 +2694,7 @@ export default function Annotation() {
           
           const zoom = canvas.getZoom() || 1
           if (activeObject.type === 'rect') {
+            hasActiveAnnotationRef.current = true
             const base = (activeObject as any)._baseStrokeWidth ?? 2
             activeObject.set({
               uniformScaling: false,
@@ -4181,10 +4187,8 @@ export default function Annotation() {
         const handleMouseDown = (e: fabric.IEvent<MouseEvent>) => {
           // 在事件处理的最开始立即保存 activeObject，因为 selection:cleared 可能在 mouse:down 之前触发
           const activeObjectAtStart = canvas.getActiveObject()
-          const hadActivePolygonAtStart = activeObjectAtStart && activeObjectAtStart.type === 'polygon'
-          // 也检查 ref 作为备用
-          const hadActivePolygonFromRef = hasActivePolygonRef.current
-          const hadActivePolygon = hadActivePolygonAtStart || hadActivePolygonFromRef
+          // 是否有选中的标注（矩形或多边形），点击空白时应取消选择
+          const hadActiveAnnotation = (activeObjectAtStart && (activeObjectAtStart.type === 'rect' || activeObjectAtStart.type === 'polygon')) || hasActiveAnnotationRef.current
           
           // 如果正在平移，不处理其他操作（右键拖动由原生事件处理）
           if (isPanningRef.current) {
@@ -4350,15 +4354,10 @@ export default function Annotation() {
           const pointer = canvas.getPointer(e.e)
           const annotationType = project?.annotation_type || 'detection'
           
-          // 如果点击的是空白区域（e.target 为 null 或背景图片），检查是否有选中的多边形
-          // 使用在事件处理开始时保存的状态
+          // 如果点击的是空白区域（e.target 为 null 或背景图片），检查是否有选中的标注（矩形或多边形）
+          // 有则取消选择，而非开始新标注
           if (!e.target || e.target === canvas.backgroundImage) {
-            if (hadActivePolygon) {
-              console.log('点击空白区域，取消选择多边形（使用保存的状态）', {
-                hadActivePolygonAtStart,
-                hadActivePolygonFromRef,
-                activeObjectAtStartType: activeObjectAtStart?.type
-              })
+            if (hadActiveAnnotation) {
               canvas.discardActiveObject()
               canvas.renderAll()
               return
@@ -4505,22 +4504,14 @@ export default function Annotation() {
           
           // 如果点击的是空白区域（没有点击到任何标注对象）
           // 检查是否有选中的多边形，如果有则取消选择（使用保存的状态）
-          if (!clickedObject && !isTargetAnnotation && hadActivePolygon) {
-            console.log('点击空白区域检查（后续检查）:', {
-              clickedObject: !!clickedObject,
-              isTargetAnnotation,
-              target: target?.type,
-              hadActivePolygonAtStart,
-              hadActivePolygonFromRef,
-              hadActivePolygon
-            })
-            console.log('点击空白区域，取消选择多边形')
+          if (!clickedObject && !isTargetAnnotation && hadActiveAnnotation) {
+              console.log('点击空白区域，取消选择标注')
             canvas.discardActiveObject()
             canvas.renderAll()
             return
           }
           
-          // 如果没有选中的多边形，开始绘制
+          // 如果没有选中的标注，开始绘制
           const currentSelectedCategory = selectedCategoryRef.current
           if (currentSelectedCategory === null || currentSelectedCategory === undefined) {
             message.warning('请先选择类别')
@@ -4996,6 +4987,8 @@ export default function Annotation() {
         // 也检查 ref 作为备用
         const hadActivePolygonFromRef = hasActivePolygonRef.current
         const hadActivePolygon = hadActivePolygonAtStart || hadActivePolygonFromRef
+        // 是否有选中的标注（矩形或多边形），点击空白时应取消选择
+        const hadActiveAnnotation = (activeObjectAtStart && (activeObjectAtStart.type === 'rect' || activeObjectAtStart.type === 'polygon')) || hasActiveAnnotationRef.current
         
         console.log('========== handleMouseDown 触发 ==========')
         console.log('事件信息:', { button: e.e.button, target: e.target, type: e.e.type })
@@ -5008,7 +5001,8 @@ export default function Annotation() {
           activeObjectAtStart: activeObjectAtStart?.type,
           hadActivePolygonAtStart,
           hadActivePolygonFromRef,
-          hadActivePolygon
+          hadActivePolygon,
+          hadActiveAnnotation
         })
         
         // 如果正在平移，不处理其他操作（右键拖动由原生事件处理）
@@ -5178,15 +5172,11 @@ export default function Annotation() {
         const annotationType = project?.annotation_type || 'detection'
         console.log('点击位置（pointer）:', pointer, 'canvas尺寸:', { width: canvas.width, height: canvas.height })
         
-        // 如果点击的是空白区域（e.target 为 null 或背景图片），检查是否有选中的多边形
-        // 使用在事件处理开始时保存的状态
+        // 如果点击的是空白区域（e.target 为 null 或背景图片），检查是否有选中的标注（矩形或多边形）
+        // 有则取消选择，而非开始新标注
         if (!e.target || e.target === canvas.backgroundImage) {
-          if (hadActivePolygon) {
-            console.log('点击空白区域，取消选择多边形（使用保存的状态）', {
-              hadActivePolygonAtStart,
-              hadActivePolygonFromRef,
-              activeObjectAtStartType: activeObjectAtStart?.type
-            })
+          if (hadActiveAnnotation) {
+            console.log('点击空白区域，取消选择标注（矩形或多边形）')
             canvas.discardActiveObject()
             canvas.renderAll()
             return
@@ -5300,23 +5290,15 @@ export default function Annotation() {
         }
         
         // 如果点击的是空白区域（没有点击到任何标注对象）
-        // 检查是否有选中的多边形，如果有则取消选择（使用保存的状态）
-        if (!clickedObject && !isTargetAnnotation && hadActivePolygon) {
-          console.log('点击空白区域检查（后续检查）:', {
-            clickedObject: !!clickedObject,
-            isTargetAnnotation,
-            target: target?.type,
-            hadActivePolygonAtStart,
-            hadActivePolygonFromRef,
-            hadActivePolygon
-          })
-          console.log('点击空白区域，取消选择多边形')
+        // 检查是否有选中的标注（矩形或多边形），如果有则取消选择
+        if (!clickedObject && !isTargetAnnotation && hadActiveAnnotation) {
+          console.log('点击空白区域，取消选择标注')
           canvas.discardActiveObject()
           canvas.renderAll()
           return
         }
         
-        // 如果没有选中的多边形，开始绘制
+        // 如果没有选中的标注，开始绘制
         if (selectedCategory === null || selectedCategory === undefined) {
           message.warning('请先选择类别')
           return
