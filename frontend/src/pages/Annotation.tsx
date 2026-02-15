@@ -2192,6 +2192,7 @@ export default function Annotation() {
             stroke: categoryColor,
             strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
             strokeUniform: true, // 确保线宽不受对象缩放影响
+            objectCaching: false, // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
             selectable: true,
             evented: true,
             lockRotation: true, // 目标检测标注框不支持旋转
@@ -2425,7 +2426,8 @@ export default function Annotation() {
             const base = (rect as any)._baseStrokeWidth ?? 2
             rect.set({
               strokeWidth: Math.max(0.5, base / zoom),
-              strokeUniform: true
+              strokeUniform: true,
+              objectCaching: false // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
             }, false)
             ;(rect as any)._baseStrokeWidth = base
           } else if (obj.type === 'polygon') {
@@ -2457,6 +2459,7 @@ export default function Annotation() {
               lockRotation: true, // 目标检测标注框不支持旋转
               strokeWidth: Math.max(0.5, base / zoom),
               strokeUniform: true,
+              objectCaching: false, // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
               // 设置控制点颜色，使其在浅色图片下更明显
               cornerColor: '#1890ff', // 深蓝色填充
               cornerStrokeColor: '#ffffff', // 白色边框
@@ -2693,6 +2696,7 @@ export default function Annotation() {
               lockRotation: true, // 目标检测标注框不支持旋转
               strokeWidth: Math.max(0.5, base / zoom),
               strokeUniform: true,
+              objectCaching: false, // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
               // 设置控制点颜色，使其在浅色图片下更明显
               cornerColor: '#1890ff', // 深蓝色填充
               cornerStrokeColor: '#ffffff', // 白色边框
@@ -4568,6 +4572,7 @@ export default function Annotation() {
               stroke: categoryColor,
               strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
               strokeUniform: true, // 确保线宽不受对象缩放影响
+              objectCaching: false, // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
               selectable: false,  // 绘制过程中不可选择，完成后再启用
               evented: false,
             })
@@ -5360,6 +5365,7 @@ export default function Annotation() {
             stroke: categoryColor,
             strokeWidth: Math.max(0.5, rectBaseStroke / (canvas.getZoom() || 1)),
             strokeUniform: true, // 确保线宽不受对象缩放影响
+            objectCaching: false, // 禁用缓存，否则缩放时 strokeUniform 会失效（fabric#6413）
             selectable: true,
             evented: true,
           })
