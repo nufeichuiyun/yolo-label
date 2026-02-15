@@ -1,6 +1,7 @@
 """
 训练路由
 """
+import json
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +11,7 @@ from typing import List
 
 from app.database import get_db
 from app.models import User, TrainingTask, Project, Category, UserRole
-from app.schemas import TrainingTaskCreate, TrainingTaskResponse
+from app.schemas import TrainingTaskCreate, TrainingTaskResponse, TrainingTaskMetrics
 from app.auth import get_current_user
 from app.routers.projects import check_project_permission
 from app.services.training_service import (
@@ -18,13 +19,33 @@ from app.services.training_service import (
     get_default_base_model,
     get_available_base_models,
 )
-from app.tasks.training import train_model_task
+from app.tasks.training import train_model_task, TRAINING_METRICS_KEY_PREFIX
 from app.celery_app import celery_app
 
 router = APIRouter(prefix="/api/training", tags=["训练"])
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
 CELERY_TASK_KEY_PREFIX = "training_celery:"
 CELERY_TASK_TTL = 86400  # 24 小时
+
+
+def _get_latest_metrics(task_id: str) -> TrainingTaskMetrics | None:
+    """从 Redis 读取训练实时指标"""
+    try:
+        import redis
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        raw = r.get(f"{TRAINING_METRICS_KEY_PREFIX}{task_id}")
+        if raw:
+            data = json.loads(raw)
+            return TrainingTaskMetrics(
+                epoch=data.get("epoch"),
+                loss=data.get("loss"),
+                map50=data.get("map50"),
+                map50_95=data.get("map50_95"),
+                lr=data.get("lr"),
+            )
+    except Exception:
+        pass
+    return None
 
 
 @router.post("", response_model=TrainingTaskResponse)
@@ -108,12 +129,17 @@ async def get_training_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取训练任务状态"""
+    """获取训练任务状态（运行中时包含 latest_metrics）"""
     task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     check_project_permission(task.project_id, current_user, db)
-    return task
+    resp = TrainingTaskResponse.model_validate(task)
+    if task.status == "running":
+        metrics = _get_latest_metrics(task_id)
+        if metrics:
+            resp.latest_metrics = metrics
+    return resp
 
 
 @router.post("/task/{task_id}/revoke")

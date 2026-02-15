@@ -255,6 +255,15 @@ class TrainingTaskCreate(BaseModel):
     train_split: Optional[float] = 0.8
 
 
+class TrainingTaskMetrics(BaseModel):
+    """训练实时指标（从 Redis 读取）"""
+    epoch: Optional[int] = None
+    loss: Optional[float] = None
+    map50: Optional[float] = None
+    map50_95: Optional[float] = None
+    lr: Optional[float] = None
+
+
 class TrainingTaskResponse(BaseModel):
     id: int
     project_id: int
@@ -271,6 +280,7 @@ class TrainingTaskResponse(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime]
+    latest_metrics: Optional[TrainingTaskMetrics] = None  # 实时指标，仅运行中任务有
 
     class Config:
         from_attributes = True

@@ -1,5 +1,13 @@
 import { client } from './client'
 
+export interface TrainingTaskMetrics {
+  epoch?: number
+  loss?: number
+  map50?: number
+  map50_95?: number
+  lr?: number
+}
+
 export interface TrainingTask {
   id: number
   project_id: number
@@ -16,6 +24,7 @@ export interface TrainingTask {
   created_by: number
   created_at: string
   updated_at?: string
+  latest_metrics?: TrainingTaskMetrics
 }
 
 export interface TrainingTaskCreate {

@@ -1,6 +1,7 @@
 """
 YOLO 模型训练任务
 """
+import json
 import os
 import shutil
 import tempfile
@@ -18,6 +19,8 @@ except ImportError:
 
 TRAINING_OUTPUT_DIR = os.getenv("TRAINING_OUTPUT_DIR", "./training_output")
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
+TRAINING_METRICS_KEY_PREFIX = "training_metrics:"
+TRAINING_METRICS_TTL = 86400  # 24 小时
 
 
 def _resolve_workers() -> int:
@@ -135,6 +138,16 @@ def train_model_task(
                 except Exception as e:
                     print(f"[training] 进度更新异常: {e}")
 
+            def _save_metrics_to_redis(metrics_dict: dict):
+                """将训练指标写入 Redis 供前端实时展示"""
+                try:
+                    import redis
+                    r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+                    key = f"{TRAINING_METRICS_KEY_PREFIX}{task_id}"
+                    r.setex(key, TRAINING_METRICS_TTL, json.dumps(metrics_dict))
+                except Exception as e:
+                    print(f"[training] Redis 写入指标异常: {e}")
+
             # 每个完整 epoch 结束（含验证）后更新
             def on_fit_epoch_end(trainer):
                 try:
@@ -142,6 +155,41 @@ def train_model_task(
                     total = getattr(trainer, "epochs", epochs)
                     progress = int(5 + 90 * current / total)
                     _update_progress(current, progress)
+
+                    # 采集 loss、mAP 等指标写入 Redis
+                    metrics_dict = {"epoch": current, "progress": progress}
+                    tloss = getattr(trainer, "tloss", None)
+                    if tloss is not None:
+                        try:
+                            v = float(tloss.mean() if hasattr(tloss, "mean") else float(tloss))
+                            metrics_dict["loss"] = round(v, 4)
+                        except (TypeError, ValueError):
+                            pass
+                    m = getattr(trainer, "metrics", None)
+                    if m is not None and isinstance(m, dict):
+                        for key in ("metrics/mAP50(B)", "metrics/mAP50(S)", "map50"):
+                            if key in m and m[key] is not None:
+                                try:
+                                    metrics_dict["map50"] = round(float(m[key]), 4)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
+                        for key in ("metrics/mAP50-95(B)", "metrics/mAP50-95(S)", "map50-95"):
+                            if key in m and m[key] is not None:
+                                try:
+                                    metrics_dict["map50_95"] = round(float(m[key]), 4)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
+                    lr_dict = getattr(trainer, "lr", None) or {}
+                    if lr_dict:
+                        lr_vals = [v for v in lr_dict.values() if v is not None]
+                        if lr_vals:
+                            try:
+                                metrics_dict["lr"] = round(float(lr_vals[0]), 6)
+                            except (TypeError, ValueError):
+                                pass
+                    _save_metrics_to_redis(metrics_dict)
                 except Exception as e:
                     print(f"[training] 回调异常: {e}")
 

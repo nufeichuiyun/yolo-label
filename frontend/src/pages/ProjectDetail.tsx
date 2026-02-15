@@ -1357,6 +1357,24 @@ export default function ProjectDetail() {
                   <span>Epoch {currentTrainingTask.current_epoch} / {currentTrainingTask.epochs}</span>
                   <Tag color="processing">训练中...</Tag>
                 </div>
+                {currentTrainingTask.latest_metrics && (
+                  <div style={{ marginTop: 12, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 12 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 16px' }}>
+                      {currentTrainingTask.latest_metrics.loss != null && (
+                        <span><strong>Loss:</strong> {currentTrainingTask.latest_metrics.loss.toFixed(4)}</span>
+                      )}
+                      {currentTrainingTask.latest_metrics.map50 != null && (
+                        <span><strong>mAP50:</strong> {(currentTrainingTask.latest_metrics.map50 * 100).toFixed(2)}%</span>
+                      )}
+                      {currentTrainingTask.latest_metrics.map50_95 != null && (
+                        <span><strong>mAP50-95:</strong> {(currentTrainingTask.latest_metrics.map50_95 * 100).toFixed(2)}%</span>
+                      )}
+                      {currentTrainingTask.latest_metrics.lr != null && (
+                        <span><strong>LR:</strong> {currentTrainingTask.latest_metrics.lr.toExponential(2)}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </Space>
           </Card>
