@@ -1,0 +1,14 @@
+# GPU 支持覆盖配置（需安装 nvidia-container-toolkit）
+# 使用方式: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  celery-worker:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
