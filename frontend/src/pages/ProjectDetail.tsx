@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select } from 'antd'
-import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider } from 'antd'
+import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined, StopOutlined } from '@ant-design/icons'
 import { projectsApi, Project } from '../api/projects'
 import { imagesApi, Image } from '../api/images'
 import { statsApi, ProjectStats } from '../api/stats'
@@ -80,7 +80,7 @@ export default function ProjectDetail() {
   const [trainingPollingInterval, setTrainingPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
   const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
-  const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16 })
+  const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16, train_split: 0.8 })
   const [startingTraining, setStartingTraining] = useState(false)
   
   const { user } = useAuth()
@@ -313,6 +313,7 @@ export default function ProjectDetail() {
         epochs: trainingConfig.epochs,
         imgsz: trainingConfig.imgsz,
         batch: trainingConfig.batch,
+        train_split: trainingConfig.train_split,
       })
       message.success('训练任务已启动，将在后台执行')
       setTrainingModalVisible(false)
@@ -328,6 +329,22 @@ export default function ProjectDetail() {
   const handleOpenTrainingModal = () => {
     setTrainingModalVisible(true)
     loadBaseModels()
+  }
+
+  const handleRevokeTraining = async () => {
+    if (!currentTrainingTask) return
+    try {
+      await trainingApi.revokeTask(currentTrainingTask.task_id)
+      message.success('已发送停止信号，任务将尽快终止')
+      setCurrentTrainingTask(null)
+      if (trainingPollingInterval) {
+        clearInterval(trainingPollingInterval)
+        setTrainingPollingInterval(null)
+      }
+      loadTrainingHistory()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '停止失败')
+    }
   }
 
   const handleDownloadTrainedModel = async (task: TrainingTask) => {
@@ -1235,11 +1252,31 @@ export default function ProjectDetail() {
               <div style={{ marginBottom: 8, fontWeight: 500 }}>批次大小 (batch)</div>
               <Input
                 type="number"
-                min={1}
+                min={0}
                 max={128}
                 value={trainingConfig.batch}
-                onChange={(e) => setTrainingConfig(prev => ({ ...prev, batch: Number(e.target.value) || 16 }))}
+                onChange={(e) => setTrainingConfig(prev => ({ ...prev, batch: Number(e.target.value) }))}
+                placeholder="0=自动（根据显存）"
               />
+              <div style={{ marginTop: 4, fontSize: '12px', color: '#999' }}>0 表示自动检测（有 GPU 时根据显存选择最优值）</div>
+            </div>
+            <div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>训练集比例 (train_split)</div>
+              <Slider
+                min={0.5}
+                max={0.95}
+                step={0.05}
+                value={trainingConfig.train_split}
+                onChange={(v) => setTrainingConfig(prev => ({ ...prev, train_split: v }))}
+                marks={{ 0.5: '50%', 0.7: '70%', 0.8: '80%', 0.9: '90%', 0.95: '95%' }}
+              />
+              {stats && stats.annotated_images >= 10 && (
+                <div style={{ padding: '8px 0', color: '#666', fontSize: '13px' }}>
+                  已标注图片共 <strong>{stats.annotated_images}</strong> 张，
+                  按比例划分：训练集 <strong>{Math.floor(stats.annotated_images * trainingConfig.train_split)}</strong> 张，
+                  验证集 <strong>{stats.annotated_images - Math.floor(stats.annotated_images * trainingConfig.train_split)}</strong> 张
+                </div>
+              )}
             </div>
             <div style={{ textAlign: 'right' }}>
               <Space>
@@ -1282,17 +1319,31 @@ export default function ProjectDetail() {
                     </div>
                   </div>
                 </div>
-                <Button
-                  type="text"
-                  icon={<CloseOutlined />}
-                  onClick={() => {
-                    setCurrentTrainingTask(null)
-                    if (trainingPollingInterval) {
-                      clearInterval(trainingPollingInterval)
-                      setTrainingPollingInterval(null)
-                    }
-                  }}
-                />
+                <Space>
+                  <Popconfirm
+                    title="确认停止"
+                    description="确定要停止当前训练任务吗？已训练的进度将丢失。"
+                    onConfirm={handleRevokeTraining}
+                    okText="停止"
+                    okButtonProps={{ danger: true }}
+                    cancelText="取消"
+                  >
+                    <Button type="text" icon={<StopOutlined />} danger>
+                      停止训练
+                    </Button>
+                  </Popconfirm>
+                  <Button
+                    type="text"
+                    icon={<CloseOutlined />}
+                    onClick={() => {
+                      setCurrentTrainingTask(null)
+                      if (trainingPollingInterval) {
+                        clearInterval(trainingPollingInterval)
+                        setTrainingPollingInterval(null)
+                      }
+                    }}
+                  />
+                </Space>
               </div>
               <div>
                 <Progress

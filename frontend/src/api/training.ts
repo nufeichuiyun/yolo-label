@@ -62,6 +62,11 @@ export const trainingApi = {
     return response.data
   },
 
+  // 中断/停止正在进行的训练任务
+  revokeTask: async (taskId: string): Promise<void> => {
+    await client.post(`/api/training/task/${taskId}/revoke`)
+  },
+
   // 下载训练完成的模型
   downloadModel: async (taskId: string, filename: string): Promise<void> => {
     const response = await client.get(`/api/training/download/${taskId}`, {

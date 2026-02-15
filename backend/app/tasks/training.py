@@ -20,6 +20,22 @@ TRAINING_OUTPUT_DIR = os.getenv("TRAINING_OUTPUT_DIR", "./training_output")
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
 
 
+def _resolve_workers() -> int:
+    """根据 CPU 核心数自动设置 DataLoader workers，可通过 TRAINING_WORKERS 覆盖"""
+    env_val = os.getenv("TRAINING_WORKERS", "").strip()
+    if env_val.isdigit():
+        return int(env_val)
+    n = os.cpu_count() or 4
+    return min(8, max(0, n - 1))  # 留 1 核给主进程
+
+
+def _resolve_batch(batch: int, has_gpu: bool) -> int:
+    """解析 batch：<=0 时根据是否有 GPU 使用自动 batch 或默认 16"""
+    if batch is not None and batch > 0:
+        return batch
+    return -1 if has_gpu else 16  # -1 = ultralytics 自动检测最优 batch
+
+
 class DatabaseTask(Task):
     """带数据库会话的任务基类"""
     _db: Session = None
@@ -100,36 +116,73 @@ def train_model_task(
             output_project = os.path.join(TRAINING_OUTPUT_DIR, project_name)
             os.makedirs(output_project, exist_ok=True)
 
-            # 创建 epoch 回调以更新进度
-            def on_train_epoch_end(trainer):
-                current = getattr(trainer, "epoch", 0) + 1
-                total = getattr(trainer, "epochs", epochs)
-                progress = int(5 + 90 * current / total)  # 5-95% 用于训练
-                task.current_epoch = current
-                task.progress = min(progress, 95)
-                db.commit()
-                self.update_state(
-                    state="PROGRESS",
-                    meta={
-                        "progress": task.progress,
-                        "current_epoch": current,
-                        "total_epochs": total,
-                        "stage": "training"
-                    }
-                )
+            # 进度回调：使用独立 session 避免与主任务 session 冲突导致阻塞/死锁
+            def _update_progress(current_epoch: int, progress_pct: int):
+                try:
+                    _db = SessionLocal()
+                    try:
+                        _t = _db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
+                        if _t:
+                            _t.current_epoch = current_epoch
+                            _t.progress = min(progress_pct, 95)
+                            _db.commit()
+                    finally:
+                        _db.close()
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={"progress": min(progress_pct, 95), "current_epoch": current_epoch, "total_epochs": epochs, "stage": "training"}
+                    )
+                except Exception as e:
+                    print(f"[training] 进度更新异常: {e}")
 
-            model.add_callback("on_train_epoch_end", on_train_epoch_end)
+            # 每个完整 epoch 结束（含验证）后更新
+            def on_fit_epoch_end(trainer):
+                try:
+                    current = getattr(trainer, "epoch", 0) + 1
+                    total = getattr(trainer, "epochs", epochs)
+                    progress = int(5 + 90 * current / total)
+                    _update_progress(current, progress)
+                except Exception as e:
+                    print(f"[training] 回调异常: {e}")
+
+            # 每个 batch 结束轻量更新，让用户看到训练在进行（每 50 batch 更新一次 DB，避免过于频繁）
+            _last_batch_progress = [0]
+
+            def on_train_batch_end(trainer):
+                try:
+                    epoch = getattr(trainer, "epoch", 0)
+                    batch_i = getattr(trainer, "batch_i", 0)
+                    nb = max(getattr(trainer, "nb", 1), 1)
+                    # 每 50 个 batch 或 epoch 末更新
+                    if batch_i % 50 == 0 or batch_i >= nb - 1:
+                        batch_progress = (epoch * nb + batch_i + 1) / (epochs * nb) if epochs * nb > 0 else 0
+                        progress = int(5 + 90 * batch_progress)
+                        if progress > _last_batch_progress[0]:
+                            _last_batch_progress[0] = progress
+                            _update_progress(epoch + 1, progress)
+                except Exception:
+                    pass
+
+            model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
+            model.add_callback("on_train_batch_end", on_train_batch_end)
+
+            has_gpu = bool(torch and torch.cuda.is_available())
+            device = "cuda:0" if has_gpu else "cpu"
+            workers = _resolve_workers()
+            batch_resolved = _resolve_batch(batch, has_gpu)
+            print(f"[training] device={device}, workers={workers}, batch={batch_resolved} (auto={batch_resolved == -1})")
 
             results = model.train(
                 data=data_yaml_path,
                 epochs=epochs,
                 imgsz=imgsz,
-                batch=batch,
+                batch=batch_resolved,
+                workers=workers,
                 project=output_project,
                 name="train",
                 exist_ok=True,
                 verbose=True,
-                device="cuda:0" if torch and torch.cuda.is_available() else "cpu"
+                device=device
             )
 
             # 3. 复制输出模型到 models 目录

@@ -66,6 +66,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: yolo-label-celery-worker
+    # 共享内存：PyTorch 多 worker 需要，默认 4GB 适配 32GB 内存服务器，可通过 SHM_SIZE 覆盖
+    shm_size: '${SHM_SIZE:-4gb}'
     environment:
       - DATABASE_URL=postgresql://yolo_label:yolo_label_password@db:5432/yolo_label_db
       - REDIS_URL=redis://redis:6379/0
@@ -75,6 +77,7 @@ services:
       - TRAINING_OUTPUT_DIR=/app/training_output
       - QT_QPA_PLATFORM=offscreen  # 禁用OpenCV的GUI功能
       - DISPLAY=  # 禁用显示
+      - TRAINING_WORKERS=${TRAINING_WORKERS:-}
     volumes:
       - ./backend:/app
       - uploads_data:/app/uploads

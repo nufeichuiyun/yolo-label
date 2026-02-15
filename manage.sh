@@ -61,6 +61,22 @@ BACKEND_PORT=""
 DB_PORT=""
 REDIS_PORT=""
 
+# 根据系统内存自动设置 SHM_SIZE（Docker 共享内存，供 PyTorch 多 worker 使用）
+if [ -z "${SHM_SIZE:-}" ]; then
+    if command -v free &>/dev/null; then
+        total_gb=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}')
+        if [ -n "$total_gb" ] && [ "$total_gb" -ge 32 ]; then
+            export SHM_SIZE=4g
+        elif [ -n "$total_gb" ] && [ "$total_gb" -ge 16 ]; then
+            export SHM_SIZE=2g
+        else
+            export SHM_SIZE=1g
+        fi
+    else
+        export SHM_SIZE=2g
+    fi
+fi
+
 # 检测 compose 命令（兼容 docker-compose 和 docker compose V2）
 if command -v docker-compose &>/dev/null; then
     DOCKER_COMPOSE="docker-compose"
@@ -719,12 +735,15 @@ services:
       dockerfile: Dockerfile
     container_name: yolo-label-celery-worker
     restart: always
+    shm_size: '${SHM_SIZE:-4gb}'
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
+      - TRAINING_OUTPUT_DIR=/app/training_output
+      - TRAINING_WORKERS=\${TRAINING_WORKERS:-}
       - QT_QPA_PLATFORM=offscreen
       - DISPLAY=
 ${gpu_env_section}
@@ -732,6 +751,7 @@ ${gpu_env_section}
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
       - models_data:/app/models
+      - training_output_data:/app/training_output
     depends_on:
       db:
         condition: service_healthy
@@ -758,6 +778,7 @@ volumes:
   uploads_data:
   annotations_data:
   models_data:
+  training_output_data:
 COMPOSEFILE
 
     print_success "Docker Compose 配置已生成: docker-compose.prod.yml"

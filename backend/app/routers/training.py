@@ -19,9 +19,12 @@ from app.services.training_service import (
     get_available_base_models,
 )
 from app.tasks.training import train_model_task
+from app.celery_app import celery_app
 
 router = APIRouter(prefix="/api/training", tags=["训练"])
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
+CELERY_TASK_KEY_PREFIX = "training_celery:"
+CELERY_TASK_TTL = 86400  # 24 小时
 
 
 @router.post("", response_model=TrainingTaskResponse)
@@ -58,7 +61,7 @@ async def create_training_task(
     base_model = task_data.base_model or get_default_base_model(project.annotation_type.value)
     epochs = task_data.epochs or 100
     imgsz = task_data.imgsz or 640
-    batch = task_data.batch or 16
+    batch = task_data.batch if task_data.batch is not None else 16  # 0=自动根据显存
     train_split = task_data.train_split or 0.8
 
     task_id = str(uuid.uuid4())
@@ -78,7 +81,7 @@ async def create_training_task(
     db.commit()
     db.refresh(db_task)
 
-    train_model_task.delay(
+    result = train_model_task.delay(
         task_id=task_id,
         project_id=task_data.project_id,
         base_model=base_model,
@@ -87,6 +90,14 @@ async def create_training_task(
         batch=batch,
         train_split=train_split
     )
+    # 存储 Celery 任务 ID，用于后续 revoke
+    if result and result.id:
+        import redis
+        try:
+            r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+            r.setex(f"{CELERY_TASK_KEY_PREFIX}{task_id}", CELERY_TASK_TTL, result.id)
+        except Exception:
+            pass
 
     return db_task
 
@@ -103,6 +114,38 @@ async def get_training_task(
         raise HTTPException(status_code=404, detail="任务不存在")
     check_project_permission(task.project_id, current_user, db)
     return task
+
+
+@router.post("/task/{task_id}/revoke")
+async def revoke_training_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """中断/停止正在进行的训练任务"""
+    task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    check_project_permission(task.project_id, current_user, db, required_role=UserRole.PROJECT_ADMIN)
+
+    if task.status != "running":
+        raise HTTPException(status_code=400, detail="只能中断正在运行的任务")
+
+    import redis
+    try:
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        celery_task_id = r.get(f"{CELERY_TASK_KEY_PREFIX}{task_id}")
+        if celery_task_id:
+            celery_task_id = celery_task_id.decode() if isinstance(celery_task_id, bytes) else celery_task_id
+            celery_app.control.revoke(celery_task_id, terminate=True)
+            task.status = "failed"
+            task.error_message = "用户中断"
+            db.commit()
+            return {"message": "已发送停止信号，任务将尽快终止"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
+
+    raise HTTPException(status_code=400, detail="未找到对应的 Celery 任务，可能已完成或已过期")
 
 
 @router.get("/project/{project_id}", response_model=List[TrainingTaskResponse])
