@@ -76,7 +76,7 @@ async def create_training_task(
         TrainingTask.status == "running"
     ).first()
     if running:
-        raise HTTPException(status_code=400, detail="该项目已有训练任务正在运行，请等待完成")
+        raise HTTPException(status_code=400, detail="该项目已有训练任务正在运行，请先停止或等待完成后再开始新训练")
 
     # 确定基础模型
     base_model = task_data.base_model or get_default_base_model(project.annotation_type.value)

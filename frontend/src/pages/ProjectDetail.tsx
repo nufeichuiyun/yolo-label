@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider } from 'antd'
+import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider, Tooltip } from 'antd'
 import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined, StopOutlined } from '@ant-design/icons'
 import { projectsApi, Project } from '../api/projects'
 import { imagesApi, Image } from '../api/images'
@@ -788,14 +788,28 @@ export default function ProjectDetail() {
               AI预标注
             </Button>
             {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
-              <Button 
-                type="primary" 
-                icon={<ThunderboltOutlined />} 
-                onClick={handleOpenTrainingModal}
-                disabled={!(stats && stats.annotated_images >= 10 && categories.length >= 2)}
+              <Tooltip
+                title={
+                  trainingHistory.some(t => t.status === 'running') || currentTrainingTask?.status === 'running'
+                    ? '请先停止当前训练或等待完成后再开始新训练'
+                    : null
+                }
               >
-                开始训练
-              </Button>
+                <span>
+                  <Button 
+                    type="primary" 
+                    icon={<ThunderboltOutlined />} 
+                    onClick={handleOpenTrainingModal}
+                    disabled={
+                      !(stats && stats.annotated_images >= 10 && categories.length >= 2) ||
+                      trainingHistory.some(t => t.status === 'running') ||
+                      currentTrainingTask?.status === 'running'
+                    }
+                  >
+                    开始训练
+                  </Button>
+                </span>
+              </Tooltip>
             )}
             {taskHistory.length > 0 && (
               <Button 
