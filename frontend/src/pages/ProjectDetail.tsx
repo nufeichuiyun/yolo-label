@@ -766,9 +766,9 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {/* AI预标注与训练功能区域 */}
-        <Card style={{ marginTop: 16 }}>
-          <Space>
+        {/* AI预标注功能区域 */}
+        <Card title="AI 预标注" style={{ marginTop: 16 }}>
+          <Space wrap>
             <Button 
               type="primary"
               icon={<RobotOutlined />}
@@ -787,7 +787,27 @@ export default function ProjectDetail() {
             >
               AI预标注
             </Button>
-            {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
+            {taskHistory.length > 0 && (
+              <Button 
+                type="primary"
+                icon={<HistoryOutlined />}
+                onClick={() => setTaskHistoryVisible(true)}
+              >
+                AI 预标注任务历史
+                {taskHistory.filter(t => t.status === 'running').length > 0 && (
+                  <Tag color="processing" style={{ marginLeft: 4 }}>
+                    {taskHistory.filter(t => t.status === 'running').length} 运行中
+                  </Tag>
+                )}
+              </Button>
+            )}
+          </Space>
+        </Card>
+
+        {/* 训练功能区域 */}
+        {(user?.role === 'super_admin' || user?.role === 'project_admin') && (
+          <Card title="模型训练" style={{ marginTop: 16 }}>
+            <Space wrap>
               <Tooltip
                 title={
                   trainingHistory.some(t => t.status === 'running') || currentTrainingTask?.status === 'running'
@@ -810,37 +830,23 @@ export default function ProjectDetail() {
                   </Button>
                 </span>
               </Tooltip>
-            )}
-            {taskHistory.length > 0 && (
-              <Button 
-                type="primary"
-                icon={<HistoryOutlined />}
-                onClick={() => setTaskHistoryVisible(true)}
-              >
-                任务历史
-                {taskHistory.filter(t => t.status === 'running').length > 0 && (
-                  <Tag color="processing" style={{ marginLeft: 4 }}>
-                    {taskHistory.filter(t => t.status === 'running').length} 运行中
-                  </Tag>
-                )}
-              </Button>
-            )}
-            {(trainingHistory.length > 0 || currentTrainingTask) && (user?.role === 'super_admin' || user?.role === 'project_admin') && (
-              <Button 
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                onClick={() => setTrainingHistoryVisible(true)}
-              >
-                训练历史
-                {trainingHistory.filter(t => t.status === 'running').length > 0 && (
-                  <Tag color="processing" style={{ marginLeft: 4 }}>
-                    {trainingHistory.filter(t => t.status === 'running').length} 运行中
-                  </Tag>
-                )}
-              </Button>
-            )}
-          </Space>
-        </Card>
+              {(trainingHistory.length > 0 || currentTrainingTask) && (
+                <Button 
+                  type="primary"
+                  icon={<ThunderboltOutlined />}
+                  onClick={() => setTrainingHistoryVisible(true)}
+                >
+                  训练历史
+                  {trainingHistory.filter(t => t.status === 'running').length > 0 && (
+                    <Tag color="processing" style={{ marginLeft: 4 }}>
+                      {trainingHistory.filter(t => t.status === 'running').length} 运行中
+                    </Tag>
+                  )}
+                </Button>
+              )}
+            </Space>
+          </Card>
+        )}
 
         <Card
           title={
@@ -1610,12 +1616,12 @@ export default function ProjectDetail() {
           </Card>
         )}
 
-        {/* 预标注任务历史记录模态框 */}
+        {/* AI 预标注任务历史模态框 */}
         <Modal
           title={
             <Space>
               <RobotOutlined />
-              <span>预标注任务历史</span>
+              <span>AI 预标注任务历史</span>
             </Space>
           }
           open={taskHistoryVisible}
@@ -1682,7 +1688,7 @@ export default function ProjectDetail() {
                 </List.Item>
               )
             }}
-            locale={{ emptyText: '暂无任务历史' }}
+            locale={{ emptyText: '暂无 AI 预标注任务历史' }}
           />
         </Modal>
 
