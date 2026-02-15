@@ -1806,8 +1806,12 @@ export default function Annotation() {
           fabricCanvasRef.current.selection = true
           fabricCanvasRef.current.renderAll()
         } else if (isDrawingPolygonRef.current) {
-          // 取消多边形绘制
-          cancelPolygonDrawing()
+          // 已有至少3个点时，ESC 完成多边形；否则取消
+          if (polygonPointsRef.current.length >= 3) {
+            finishPolygonDrawing()
+          } else {
+            cancelPolygonDrawing()
+          }
         }
       } else if (e.key === 'Enter') {
         e.preventDefault()
@@ -5550,7 +5554,7 @@ export default function Annotation() {
           <span style={{ marginLeft: 8, color: '#999', fontSize: '12px' }}>
             A键上一张 | D键下一张 | 自动保存 | 滚轮缩放 | 右键拖动平移
             {project?.annotation_type === 'detection' && ' | 单击开始画框 | 再次单击完成 | Esc取消'}
-            {project?.annotation_type === 'segmentation' && ' | 点击绘制多边形 | 双击/Enter完成 | Esc取消 | 右键单击删除最后一点'}
+            {project?.annotation_type === 'segmentation' && ' | 点击绘制多边形 | 双击/Enter完成 | Esc完成(≥3点)或取消 | 右键单击删除最后一点'}
           </span>
         </Space>
       </Header>
