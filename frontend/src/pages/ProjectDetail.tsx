@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider, Tooltip } from 'antd'
-import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined, StopOutlined } from '@ant-design/icons'
+import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined, StopOutlined, DownOutlined } from '@ant-design/icons'
 import { projectsApi, Project } from '../api/projects'
 import { imagesApi, Image } from '../api/images'
 import { statsApi, ProjectStats } from '../api/stats'
@@ -77,6 +77,7 @@ export default function ProjectDetail() {
   const [trainingHistoryVisible, setTrainingHistoryVisible] = useState(false)
   const [trainingHistory, setTrainingHistory] = useState<TrainingTask[]>([])
   const [currentTrainingTask, setCurrentTrainingTask] = useState<TrainingTask | null>(null)
+  const [trainingFloatVisible, setTrainingFloatVisible] = useState(true)  // 训练进度浮层是否展开（关闭仅最小化，训练继续）
   const [trainingPollingInterval, setTrainingPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
   const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
@@ -318,6 +319,7 @@ export default function ProjectDetail() {
       message.success('训练任务已启动，将在后台执行')
       setTrainingModalVisible(false)
       setCurrentTrainingTask(task)
+      setTrainingFloatVisible(true)
       startTrainingPolling(task.task_id)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动训练失败')
@@ -1314,57 +1316,55 @@ export default function ProjectDetail() {
           </Space>
         </Modal>
 
-        {/* 训练进度浮层 */}
+        {/* 训练进度浮层：关闭仅最小化，训练继续在后台进行 */}
         {currentTrainingTask && currentTrainingTask.status === 'running' && (
-          <Card
-            style={{
-              position: 'fixed',
-              bottom: 20,
-              right: 20,
-              width: 420,
-              zIndex: 1000,
-              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-              borderRadius: 8,
-              border: '1px solid #e8e8e8',
-            }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ThunderboltOutlined style={{ color: '#1890ff', fontSize: 18 }} />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 16 }}>模型训练任务</div>
-                    <div style={{ fontSize: '12px', color: '#999', marginTop: 2 }}>
-                      {new Date(currentTrainingTask.created_at).toLocaleString('zh-CN')}
+          <>
+            {trainingFloatVisible ? (
+              <Card
+                style={{
+                  position: 'fixed',
+                  bottom: 20,
+                  right: 20,
+                  width: 420,
+                  zIndex: 1000,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                  borderRadius: 8,
+                  border: '1px solid #e8e8e8',
+                }}
+              >
+                <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ThunderboltOutlined style={{ color: '#1890ff', fontSize: 18 }} />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 16 }}>模型训练任务</div>
+                        <div style={{ fontSize: '12px', color: '#999', marginTop: 2 }}>
+                          {new Date(currentTrainingTask.created_at).toLocaleString('zh-CN')}
+                        </div>
+                      </div>
                     </div>
+                    <Space>
+                      <Popconfirm
+                        title="确认停止"
+                        description="确定要停止当前训练任务吗？已训练的进度将丢失。"
+                        onConfirm={handleRevokeTraining}
+                        okText="停止"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
+                      >
+                        <Button type="text" icon={<StopOutlined />} danger>
+                          停止训练
+                        </Button>
+                      </Popconfirm>
+                      <Tooltip title="最小化（训练继续在后台进行）">
+                        <Button
+                          type="text"
+                          icon={<DownOutlined />}
+                          onClick={() => setTrainingFloatVisible(false)}
+                        />
+                      </Tooltip>
+                    </Space>
                   </div>
-                </div>
-                <Space>
-                  <Popconfirm
-                    title="确认停止"
-                    description="确定要停止当前训练任务吗？已训练的进度将丢失。"
-                    onConfirm={handleRevokeTraining}
-                    okText="停止"
-                    okButtonProps={{ danger: true }}
-                    cancelText="取消"
-                  >
-                    <Button type="text" icon={<StopOutlined />} danger>
-                      停止训练
-                    </Button>
-                  </Popconfirm>
-                  <Button
-                    type="text"
-                    icon={<CloseOutlined />}
-                    onClick={() => {
-                      setCurrentTrainingTask(null)
-                      if (trainingPollingInterval) {
-                        clearInterval(trainingPollingInterval)
-                        setTrainingPollingInterval(null)
-                      }
-                    }}
-                  />
-                </Space>
-              </div>
               <div>
                 <Progress
                   percent={currentTrainingTask.progress}
@@ -1398,6 +1398,36 @@ export default function ProjectDetail() {
               </div>
             </Space>
           </Card>
+            ) : (
+              /* 最小化状态：点击可重新展开 */
+              <Tooltip title="点击展开训练进度">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setTrainingFloatVisible(true)}
+                  onKeyDown={(e) => e.key === 'Enter' && setTrainingFloatVisible(true)}
+                  style={{
+                    position: 'fixed',
+                    bottom: 20,
+                    right: 20,
+                    zIndex: 1000,
+                    padding: '8px 16px',
+                    background: '#1890ff',
+                    color: '#fff',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: '0 2px 8px rgba(24,144,255,0.4)',
+                  }}
+                >
+                  <ThunderboltOutlined />
+                  <span>训练进行中 {currentTrainingTask.progress}%</span>
+                </div>
+              </Tooltip>
+            )}
+          </>
         )}
 
         {/* 训练历史模态框 */}
