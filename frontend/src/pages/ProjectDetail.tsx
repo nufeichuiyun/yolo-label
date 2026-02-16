@@ -359,6 +359,16 @@ export default function ProjectDetail() {
     }
   }
 
+  const handleDownloadArchive = async (task: TrainingTask) => {
+    if (!task.output_archive_path) return
+    try {
+      await trainingApi.downloadArchive(task.task_id, task.output_archive_path.split('/').pop() || `training_${task.task_id}.zip`)
+      message.success('完整包下载成功')
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '下载失败')
+    }
+  }
+
   const loadTaskHistory = useCallback(async () => {
     if (!projectId) return
     try {
@@ -1450,11 +1460,18 @@ export default function ProjectDetail() {
               const config = statusConfig[task.status] || statusConfig.pending
               return (
                 <List.Item
-                  actions={task.status === 'completed' && task.output_model_path ? [
-                    <Button key="download" type="link" onClick={() => handleDownloadTrainedModel(task)}>
-                      下载模型
-                    </Button>
-                  ] : []}
+                  actions={task.status === 'completed' ? [
+                    task.output_model_path && (
+                      <Button key="download-model" type="link" onClick={() => handleDownloadTrainedModel(task)}>
+                        下载模型
+                      </Button>
+                    ),
+                    task.output_archive_path && (
+                      <Button key="download-archive" type="link" onClick={() => handleDownloadArchive(task)}>
+                        下载完整包
+                      </Button>
+                    ),
+                  ].filter(Boolean) : []}
                 >
                   <List.Item.Meta
                     title={

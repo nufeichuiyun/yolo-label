@@ -21,6 +21,7 @@ export interface TrainingTask {
   val_images: number
   error_message?: string
   output_model_path?: string
+  output_archive_path?: string
   created_by: number
   created_at: string
   updated_at?: string
@@ -85,6 +86,21 @@ export const trainingApi = {
     const a = document.createElement('a')
     a.href = url
     a.download = filename || `model_${taskId}.pt`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  },
+
+  // 下载训练完整包（数据集+模型+训练曲线 zip）
+  downloadArchive: async (taskId: string, filename: string): Promise<void> => {
+    const response = await client.get(`/api/training/download-archive/${taskId}`, {
+      responseType: 'blob',
+    })
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `training_${taskId}.zip`
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)

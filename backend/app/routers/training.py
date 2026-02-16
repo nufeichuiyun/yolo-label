@@ -24,6 +24,7 @@ from app.celery_app import celery_app
 
 router = APIRouter(prefix="/api/training", tags=["训练"])
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
+TRAINING_OUTPUT_DIR = os.getenv("TRAINING_OUTPUT_DIR", "./training_output")
 CELERY_TASK_KEY_PREFIX = "training_celery:"
 CELERY_TASK_TTL = 86400  # 24 小时
 
@@ -227,4 +228,33 @@ async def download_trained_model(
         file_path,
         media_type="application/octet-stream",
         filename=task.output_model_path
+    )
+
+
+@router.get("/download-archive/{task_id}")
+async def download_training_archive(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """下载训练完整包（数据集+模型+训练曲线 zip）"""
+    task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    check_project_permission(task.project_id, current_user, db)
+
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务未完成，无法下载归档")
+
+    if not task.output_archive_path:
+        raise HTTPException(status_code=404, detail="未找到训练归档（可能为旧版本训练任务）")
+
+    file_path = os.path.join(TRAINING_OUTPUT_DIR, task.output_archive_path)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="归档文件不存在")
+
+    return FileResponse(
+        file_path,
+        media_type="application/zip",
+        filename=os.path.basename(task.output_archive_path)
     )

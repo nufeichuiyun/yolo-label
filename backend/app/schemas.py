@@ -277,6 +277,7 @@ class TrainingTaskResponse(BaseModel):
     val_images: int
     error_message: Optional[str] = None
     output_model_path: Optional[str] = None
+    output_archive_path: Optional[str] = None
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime]

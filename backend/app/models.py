@@ -199,6 +199,7 @@ class TrainingTask(Base):
     val_images = Column(Integer, default=0)  # 验证集图片数
     error_message = Column(Text)  # 错误信息
     output_model_path = Column(String(500))  # 输出模型路径（完成后）
+    output_archive_path = Column(String(500))  # 完整训练包 zip 路径（数据集+模型+训练曲线）
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -12,6 +12,7 @@ from app.celery_app import celery_app
 from app.database import SessionLocal
 from app.models import TrainingTask, Project
 from app.services.training_service import prepare_dataset
+from app.services.training_archive_service import create_training_archive
 from sqlalchemy.orm import Session
 
 try:
@@ -179,6 +180,21 @@ def train_model_task(
                 final_model_path = os.path.join(MODEL_DIR, final_model_name)
                 shutil.copy2(last_pt, final_model_path)
                 task.output_model_path = final_model_name
+
+            # 4. 创建训练完整包 zip（数据集+模型+训练曲线）
+            try:
+                archive_path = create_training_archive(
+                    project_name=project.name,
+                    project_id=project_id,
+                    task_id=task.id,
+                    created_at=task.created_at,
+                    dataset_dir=tmpdir,
+                    runs_dir=runs_dir,
+                    model_path=task.output_model_path or "",
+                )
+                task.output_archive_path = archive_path
+            except Exception as e:
+                print(f"[training] 创建训练归档失败（不影响训练结果）: {e}", flush=True)
 
             print("[training] 训练子进程已退出，内存已由 OS 回收", flush=True)
 
