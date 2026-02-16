@@ -1,6 +1,7 @@
 """
 预标注任务
 """
+import gc
 import os
 import json
 from typing import List, Dict
@@ -55,6 +56,7 @@ def preannotate_project_task(
         conf_threshold: 置信度阈值
     """
     db = self.db
+    yolo_service = None
     
     try:
         # 更新任务状态为运行中
@@ -81,7 +83,7 @@ def preannotate_project_task(
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
         
-        # 创建YOLO推理服务
+        # 创建YOLO推理服务（任务结束后在 finally 中释放）
         print(f"[DEBUG] 创建YOLO推理服务，模型路径: {model_path}")
         yolo_service = create_yolo_service(model_path)
         print(f"[DEBUG] YOLO推理服务创建成功")
@@ -295,6 +297,12 @@ def preannotate_project_task(
                     import traceback
                     traceback.print_exc()
                     continue
+            
+            # 每 10 批触发一次垃圾回收，减轻长时间运行时的内存累积
+            if (batch_start // batch_size) % 10 == 9:
+                gc.collect()
+                if torch and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         
         # 保存YOLO格式标注文件
         from app.routers.annotations import save_yolo_annotation
@@ -351,3 +359,16 @@ def preannotate_project_task(
             db.commit()
         
         raise
+    finally:
+        # 释放 YOLO 模型与 GPU/CPU 显存，避免内存持续占用
+        if yolo_service is not None:
+            try:
+                yolo_service.model = None
+            except Exception:
+                pass
+            del yolo_service
+            print("[DEBUG] 预标注任务结束：已释放 YOLO 模型引用")
+        gc.collect()
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("[DEBUG] 预标注任务结束：已执行 gc.collect() 和 torch.cuda.empty_cache()")

@@ -4,6 +4,8 @@ YOLO 模型训练任务
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from celery import Task
 from app.celery_app import celery_app
@@ -24,12 +26,15 @@ TRAINING_METRICS_TTL = 86400  # 24 小时
 
 
 def _resolve_workers() -> int:
-    """根据 CPU 核心数自动设置 DataLoader workers，可通过 TRAINING_WORKERS 覆盖"""
+    """
+    根据 CPU 核心数设置 DataLoader workers，可通过 TRAINING_WORKERS 覆盖。
+    默认上限 4，减少多进程内存占用（PyTorch DataLoader workers 有已知内存不释放问题）。
+    """
     env_val = os.getenv("TRAINING_WORKERS", "").strip()
     if env_val.isdigit():
         return int(env_val)
     n = os.cpu_count() or 4
-    return min(8, max(0, n - 1))  # 留 1 核给主进程
+    return min(4, max(0, n - 1))  # 上限 4，降低 worker 内存占用
 
 
 def _resolve_batch(batch: int, has_gpu: bool) -> int:
@@ -111,127 +116,48 @@ def train_model_task(
             task.epochs = epochs
             db.commit()
 
-            # 2. 训练模型
-            from ultralytics import YOLO
-
-            model = YOLO(base_model)
+            # 2. 训练模型（子进程隔离：训练在独立进程中运行，进程退出时 OS 自动回收全部内存）
             project_name = f"project_{project_id}"
             output_project = os.path.join(TRAINING_OUTPUT_DIR, project_name)
             os.makedirs(output_project, exist_ok=True)
-
-            # 进度回调：使用独立 session 避免与主任务 session 冲突导致阻塞/死锁
-            def _update_progress(current_epoch: int, progress_pct: int):
-                try:
-                    _db = SessionLocal()
-                    try:
-                        _t = _db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
-                        if _t:
-                            _t.current_epoch = current_epoch
-                            _t.progress = min(progress_pct, 95)
-                            _db.commit()
-                    finally:
-                        _db.close()
-                    self.update_state(
-                        state="PROGRESS",
-                        meta={"progress": min(progress_pct, 95), "current_epoch": current_epoch, "total_epochs": epochs, "stage": "training"}
-                    )
-                except Exception as e:
-                    print(f"[training] 进度更新异常: {e}")
-
-            def _save_metrics_to_redis(metrics_dict: dict):
-                """将训练指标写入 Redis 供前端实时展示"""
-                try:
-                    import redis
-                    r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
-                    key = f"{TRAINING_METRICS_KEY_PREFIX}{task_id}"
-                    r.setex(key, TRAINING_METRICS_TTL, json.dumps(metrics_dict))
-                except Exception as e:
-                    print(f"[training] Redis 写入指标异常: {e}")
-
-            # 每个完整 epoch 结束（含验证）后更新
-            def on_fit_epoch_end(trainer):
-                try:
-                    current = getattr(trainer, "epoch", 0) + 1
-                    total = getattr(trainer, "epochs", epochs)
-                    progress = int(5 + 90 * current / total)
-                    _update_progress(current, progress)
-
-                    # 采集 loss、mAP 等指标写入 Redis
-                    metrics_dict = {"epoch": current, "progress": progress}
-                    tloss = getattr(trainer, "tloss", None)
-                    if tloss is not None:
-                        try:
-                            v = float(tloss.mean() if hasattr(tloss, "mean") else float(tloss))
-                            metrics_dict["loss"] = round(v, 4)
-                        except (TypeError, ValueError):
-                            pass
-                    m = getattr(trainer, "metrics", None)
-                    if m is not None and isinstance(m, dict):
-                        for key in ("metrics/mAP50(B)", "metrics/mAP50(S)", "map50"):
-                            if key in m and m[key] is not None:
-                                try:
-                                    metrics_dict["map50"] = round(float(m[key]), 4)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
-                        for key in ("metrics/mAP50-95(B)", "metrics/mAP50-95(S)", "map50-95"):
-                            if key in m and m[key] is not None:
-                                try:
-                                    metrics_dict["map50_95"] = round(float(m[key]), 4)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
-                    lr_dict = getattr(trainer, "lr", None) or {}
-                    if lr_dict:
-                        lr_vals = [v for v in lr_dict.values() if v is not None]
-                        if lr_vals:
-                            try:
-                                metrics_dict["lr"] = round(float(lr_vals[0]), 6)
-                            except (TypeError, ValueError):
-                                pass
-                    _save_metrics_to_redis(metrics_dict)
-                except Exception as e:
-                    print(f"[training] 回调异常: {e}")
-
-            # 每个 batch 结束轻量更新，让用户看到训练在进行（每 50 batch 更新一次 DB，避免过于频繁）
-            _last_batch_progress = [0]
-
-            def on_train_batch_end(trainer):
-                try:
-                    epoch = getattr(trainer, "epoch", 0)
-                    batch_i = getattr(trainer, "batch_i", 0)
-                    nb = max(getattr(trainer, "nb", 1), 1)
-                    # 每 50 个 batch 或 epoch 末更新
-                    if batch_i % 50 == 0 or batch_i >= nb - 1:
-                        batch_progress = (epoch * nb + batch_i + 1) / (epochs * nb) if epochs * nb > 0 else 0
-                        progress = int(5 + 90 * batch_progress)
-                        if progress > _last_batch_progress[0]:
-                            _last_batch_progress[0] = progress
-                            _update_progress(epoch + 1, progress)
-                except Exception:
-                    pass
-
-            model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
-            model.add_callback("on_train_batch_end", on_train_batch_end)
 
             has_gpu = bool(torch and torch.cuda.is_available())
             device = "cuda:0" if has_gpu else "cpu"
             workers = _resolve_workers()
             batch_resolved = _resolve_batch(batch, has_gpu)
-            print(f"[training] device={device}, workers={workers}, batch={batch_resolved} (auto={batch_resolved == -1})")
+            print(f"[training] 使用子进程隔离训练，device={device}, workers={workers}, batch={batch_resolved}", flush=True)
 
-            results = model.train(
-                data=data_yaml_path,
-                epochs=epochs,
-                imgsz=imgsz,
-                batch=batch_resolved,
-                workers=workers,
-                project=output_project,
-                name="train",
-                exist_ok=True,
-                verbose=True,
-                device=device
+            # 通过子进程运行训练，子进程退出时所有内存被 OS  reclaim
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "app.tasks.training_runner",
+                    "--task-id",
+                    task_id,
+                    "--data-yaml",
+                    data_yaml_path,
+                    "--output-project",
+                    output_project,
+                    "--base-model",
+                    base_model,
+                    "--epochs",
+                    str(epochs),
+                    "--imgsz",
+                    str(imgsz),
+                    "--batch",
+                    str(batch_resolved),
+                    "--workers",
+                    str(workers),
+                    "--device",
+                    device,
+                ],
+                env={**os.environ},
+                cwd=os.getcwd(),
             )
+
+            if proc.returncode != 0:
+                raise RuntimeError(f"训练子进程退出码: {proc.returncode}")
 
             # 3. 复制输出模型到 models 目录
             task.progress = 98
@@ -253,6 +179,8 @@ def train_model_task(
                 final_model_path = os.path.join(MODEL_DIR, final_model_name)
                 shutil.copy2(last_pt, final_model_path)
                 task.output_model_path = final_model_name
+
+            print("[training] 训练子进程已退出，内存已由 OS 回收", flush=True)
 
         task.status = "completed"
         task.progress = 100
