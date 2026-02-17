@@ -365,7 +365,7 @@ export default function ProjectDetail() {
       await trainingApi.downloadArchive(task.task_id, task.output_archive_path.split('/').pop() || `training_${task.task_id}.zip`)
       message.success('完整包下载成功')
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '下载失败')
+      message.error(error?.message || error?.response?.data?.detail || '下载失败')
     }
   }
 

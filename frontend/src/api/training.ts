@@ -96,7 +96,25 @@ export const trainingApi = {
   downloadArchive: async (taskId: string, filename: string): Promise<void> => {
     const response = await client.get(`/api/training/download-archive/${taskId}`, {
       responseType: 'blob',
+      validateStatus: () => true, // 不自动抛出，手动检查
     })
+    // 4xx/5xx 时 data 是 Blob（含 JSON 错误体），需解析
+    if (response.status >= 400) {
+      if (response.status === 401) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+        return
+      }
+      const text = await (response.data as Blob).text()
+      let detail = '下载失败'
+      try {
+        const parsed = JSON.parse(text)
+        detail = parsed.detail || detail
+      } catch {
+        if (text) detail = text
+      }
+      throw new Error(detail)
+    }
     const url = window.URL.createObjectURL(new Blob([response.data]))
     const a = document.createElement('a')
     a.href = url

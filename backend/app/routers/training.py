@@ -2,6 +2,7 @@
 训练路由
 """
 import json
+import logging
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,7 @@ from app.services.training_service import (
     get_default_base_model,
     get_available_base_models,
 )
+from app.services.training_archive_service import TRAINING_ARCHIVES_DIR
 from app.tasks.training import train_model_task, TRAINING_METRICS_KEY_PREFIX
 from app.celery_app import celery_app
 
@@ -249,8 +251,22 @@ async def download_training_archive(
     if not task.output_archive_path:
         raise HTTPException(status_code=404, detail="未找到训练归档（可能为旧版本训练任务）")
 
-    file_path = os.path.join(TRAINING_OUTPUT_DIR, task.output_archive_path)
-    if not os.path.exists(file_path):
+    zip_name = os.path.basename(task.output_archive_path)
+    # 尝试两种路径：1) TRAINING_ARCHIVES_DIR（与创建时一致） 2) TRAINING_OUTPUT_DIR + output_archive_path
+    candidates = [
+        os.path.abspath(os.path.join(TRAINING_ARCHIVES_DIR, zip_name)),
+        os.path.abspath(os.path.join(TRAINING_OUTPUT_DIR, task.output_archive_path)),
+    ]
+    file_path = None
+    for p in candidates:
+        if os.path.exists(p):
+            file_path = p
+            break
+    if not file_path:
+        logging.warning(
+            "归档文件不存在 task_id=%s output_archive_path=%s 已查找: %s",
+            task_id, task.output_archive_path, candidates
+        )
         raise HTTPException(status_code=404, detail="归档文件不存在")
 
     return FileResponse(

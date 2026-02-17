@@ -714,12 +714,14 @@ services:
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
+      - TRAINING_OUTPUT_DIR=/app/training_output
       - QT_QPA_PLATFORM=offscreen
       - DISPLAY=
     volumes:
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
       - models_data:/app/models
+      - training_output_data:/app/training_output
     ports:
       - "${BACKEND_PORT}:8000"
     depends_on:
