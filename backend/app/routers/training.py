@@ -61,10 +61,10 @@ async def create_training_task(
         required_role=UserRole.PROJECT_ADMIN
     )
 
-    # 校验：至少 2 个类别
+    # 校验：至少 1 个类别
     categories = db.query(Category).filter(Category.project_id == task_data.project_id).all()
-    if len(categories) < 2:
-        raise HTTPException(status_code=400, detail="项目至少需要 2 个类别")
+    if len(categories) < 1:
+        raise HTTPException(status_code=400, detail="项目至少需要 1 个类别")
 
     # 校验：至少 10 张已标注图片
     images = get_annotated_images_for_project(db, task_data.project_id)

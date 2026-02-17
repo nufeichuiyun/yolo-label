@@ -65,8 +65,8 @@ def prepare_dataset(
         raise ValueError(f"已标注图片数量不足，至少需要 10 张，当前 {len(images)} 张")
     
     categories = db.query(Category).filter(Category.project_id == project_id).order_by(Category.id).all()
-    if len(categories) < 2:
-        raise ValueError(f"类别数量不足，至少需要 2 个类别，当前 {len(categories)} 个")
+    if len(categories) < 1:
+        raise ValueError(f"类别数量不足，至少需要 1 个类别，当前 {len(categories)} 个")
     
     category_id_to_class_id = {cat.id: idx for idx, cat in enumerate(categories)}
     

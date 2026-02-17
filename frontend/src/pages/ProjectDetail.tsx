@@ -824,6 +824,8 @@ export default function ProjectDetail() {
                 title={
                   trainingHistory.some(t => t.status === 'running') || currentTrainingTask?.status === 'running'
                     ? '请先停止当前训练或等待完成后再开始新训练'
+                    : !(stats && stats.annotated_images >= 10 && stats.categories_count >= 1)
+                    ? `需至少 10 张已标注图片和 1 个类别（当前：${stats?.annotated_images ?? 0} 张已标注，${stats?.categories_count ?? 0} 个类别）`
                     : null
                 }
               >
@@ -833,7 +835,7 @@ export default function ProjectDetail() {
                     icon={<ThunderboltOutlined />} 
                     onClick={handleOpenTrainingModal}
                     disabled={
-                      !(stats && stats.annotated_images >= 10 && categories.length >= 2) ||
+                      !(stats && stats.annotated_images >= 10 && stats.categories_count >= 1) ||
                       trainingHistory.some(t => t.status === 'running') ||
                       currentTrainingTask?.status === 'running'
                     }
@@ -1302,11 +1304,16 @@ export default function ProjectDetail() {
                 onChange={(v) => setTrainingConfig(prev => ({ ...prev, train_split: v }))}
                 marks={{ 0.5: '50%', 0.7: '70%', 0.8: '80%', 0.9: '90%', 0.95: '95%' }}
               />
-              {stats && stats.annotated_images >= 10 && (
+              {stats && stats.annotated_images >= 10 && stats.categories_count >= 1 && (
                 <div style={{ padding: '8px 0', color: '#666', fontSize: '13px' }}>
                   已标注图片共 <strong>{stats.annotated_images}</strong> 张，
                   按比例划分：训练集 <strong>{Math.floor(stats.annotated_images * trainingConfig.train_split)}</strong> 张，
                   验证集 <strong>{stats.annotated_images - Math.floor(stats.annotated_images * trainingConfig.train_split)}</strong> 张
+                </div>
+              )}
+              {stats && (stats.annotated_images < 10 || stats.categories_count < 1) && (
+                <div style={{ padding: '8px 0', color: '#ff4d4f', fontSize: '13px' }}>
+                  需至少 10 张已标注图片和 1 个类别（当前：{stats.annotated_images} 张已标注，{stats.categories_count} 个类别）
                 </div>
               )}
             </div>
@@ -1317,7 +1324,10 @@ export default function ProjectDetail() {
                   type="primary"
                   onClick={handleStartTraining}
                   loading={startingTraining}
-                  disabled={!trainingConfig.base_model && !defaultBaseModel}
+                  disabled={
+                    (!trainingConfig.base_model && !defaultBaseModel) ||
+                    !(stats && stats.annotated_images >= 10 && stats.categories_count >= 1)
+                  }
                 >
                   开始训练
                 </Button>
