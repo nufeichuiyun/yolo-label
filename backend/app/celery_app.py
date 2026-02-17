@@ -12,7 +12,7 @@ celery_app = Celery(
     "afa_label",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.tasks.preannotation", "app.tasks.models"]
+    include=["app.tasks.preannotation", "app.tasks.models", "app.tasks.training"]
 )
 
 # Celery配置

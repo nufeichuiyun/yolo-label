@@ -210,10 +210,42 @@ async def delete_project(
         
         # 4. 删除项目用户关联
         db.query(ProjectUser).filter(ProjectUser.project_id == project_id).delete()
-        
-        # 5. 删除项目目录
+
+        # 5. 删除训练产物（训练输出、归档、训练得到的模型）
         import os
         import shutil
+        import glob
+        from app.models import TrainingTask
+
+        training_output_dir = os.getenv("TRAINING_OUTPUT_DIR", "./training_output")
+        model_dir = os.getenv("MODEL_DIR", "./models")
+
+        # 删除训练归档（zip）
+        for t in db.query(TrainingTask).filter(TrainingTask.project_id == project_id).all():
+            if t.output_archive_path:
+                archive_path = os.path.join(training_output_dir, t.output_archive_path)
+                if os.path.exists(archive_path):
+                    try:
+                        os.remove(archive_path)
+                    except Exception:
+                        pass
+
+        # 删除训练输出目录 project_{id}
+        project_output = os.path.join(training_output_dir, f"project_{project_id}")
+        if os.path.exists(project_output):
+            try:
+                shutil.rmtree(project_output)
+            except Exception:
+                pass
+
+        # 删除该项目训练得到的模型文件 trained_{project_id}_*.pt
+        for pt in glob.glob(os.path.join(model_dir, f"trained_{project_id}_*.pt")):
+            try:
+                os.remove(pt)
+            except Exception:
+                pass
+        
+        # 6. 删除项目目录（上传、标注）
         upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
         annotation_dir = os.getenv("ANNOTATION_DIR", "./annotations")
         project_upload_dir = os.path.join(upload_dir, "images", str(project_id))
@@ -231,7 +263,7 @@ async def delete_project(
             except:
                 pass
         
-        # 6. 删除项目记录
+        # 7. 删除项目记录
         db.delete(project)
         db.commit()
         

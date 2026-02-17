@@ -38,8 +38,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_PROD="$SCRIPT_DIR/docker-compose.prod.yml"
 COMPOSE_BASE="$SCRIPT_DIR/docker-compose.yml"
 COMPOSE_DEV="$SCRIPT_DIR/docker-compose.dev.yml"
+COMPOSE_GPU="$SCRIPT_DIR/docker-compose.gpu.yml"
 ENV_FILE="$SCRIPT_DIR/.env.prod"
 DEPLOY_RECORD="$SCRIPT_DIR/.deploy_record"
+TEST_ENV_FILE="$SCRIPT_DIR/.test_env"
 
 # 默认端口
 DEFAULT_FRONTEND_PORT=3000
@@ -58,6 +60,31 @@ FRONTEND_PORT=""
 BACKEND_PORT=""
 DB_PORT=""
 REDIS_PORT=""
+
+# 根据系统内存自动设置 SHM_SIZE（Docker 共享内存，供 PyTorch 多 worker 使用）
+if [ -z "${SHM_SIZE:-}" ]; then
+    if command -v free &>/dev/null; then
+        total_gb=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}')
+        if [ -n "$total_gb" ] && [ "$total_gb" -ge 32 ]; then
+            export SHM_SIZE=4g
+        elif [ -n "$total_gb" ] && [ "$total_gb" -ge 16 ]; then
+            export SHM_SIZE=2g
+        else
+            export SHM_SIZE=1g
+        fi
+    else
+        export SHM_SIZE=2g
+    fi
+fi
+
+# 检测 compose 命令（兼容 docker-compose 和 docker compose V2）
+if command -v docker-compose &>/dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif docker compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE=""
+fi
 
 # ======================== 工具函数 ========================
 print_banner() {
@@ -222,8 +249,9 @@ check_docker() {
         print_info "请运行: sudo systemctl start docker"
         exit 1
     fi
-    if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null 2>&1; then
+    if [ -z "$DOCKER_COMPOSE" ]; then
         print_error "未安装 Docker Compose"
+        print_info "请安装 Docker Compose 或 Docker Compose V2 插件"
         exit 1
     fi
 }
@@ -351,27 +379,95 @@ detect_gpu() {
             # 清理可能损坏的旧源列表
             sudo rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list
             sudo rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-            curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-                | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null || true
-            curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-                | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-                | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq nvidia-container-toolkit
-            sudo nvidia-ctk runtime configure --runtime=docker
-            sudo systemctl restart docker
-            sleep 2
-            if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &>/dev/null 2>&1; then
-                print_success "NVIDIA Container Toolkit 安装成功"
+            local install_ok=false
+            # 使用 curl 下载：重试、较长超时；先试 IPv4 再试默认（部分网络 IPv6 HTTPS 会 reset）
+            local curl_opts="-fsSL --connect-timeout 30 --max-time 90 --retry 2 --retry-delay 5"
+            local gpg_ok=false
+            if curl $curl_opts -4 https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null \
+                | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null; then
+                gpg_ok=true
+            elif curl $curl_opts https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null \
+                | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null; then
+                gpg_ok=true
+            fi
+            if [ "$gpg_ok" = true ]; then
+                if curl -s -L $curl_opts -4 https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
+                    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+                    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null; then
+                    :
+                elif curl -s -L $curl_opts https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
+                    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+                    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null; then
+                    :
+                else
+                    gpg_ok=false
+                fi
+                if [ "$gpg_ok" = true ]; then
+                    if sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq nvidia-container-toolkit 2>/dev/null; then
+                        sudo nvidia-ctk runtime configure --runtime=docker 2>/dev/null || true
+                        sudo systemctl restart docker 2>/dev/null || true
+                        sleep 2
+                        if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &>/dev/null 2>&1; then
+                            install_ok=true
+                        fi
+                    fi
+                fi
+            fi
+            if [ "$install_ok" = false ]; then
+                print_warning "自动安装失败（可能是网络问题，HTTPS 连接被重置）"
+                echo ""
+                echo -e "  ${BOLD}请手动安装后重新运行部署：${NC}"
+                echo -e "  ${DIM}# Ubuntu/Debian（若 curl 失败可尝试加 -4 强制 IPv4）：${NC}"
+                echo -e "  curl -fsSL -4 https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+                echo -e "  curl -s -L -4 https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \\"
+                echo -e "    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list"
+                echo -e "  sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit"
+                echo -e "  sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+                echo ""
+                echo -e "  ${BOLD}或使用 CPU 模式继续部署（AI 推理较慢）：${NC}"
+                if confirm_yes "是否改用 CPU 模式继续？"; then
+                    ENABLE_GPU=false
+                    print_info "已切换为 CPU 模式"
+                else
+                    print_info "请完成手动安装后重新运行: ./manage.sh test deploy"
+                    exit 1
+                fi
             else
-                print_warning "NVIDIA Container Toolkit 安装可能未完全生效"
-                print_info "如果 GPU 功能不工作，请重启系统后重新运行部署脚本"
+                print_success "NVIDIA Container Toolkit 安装成功"
             fi
         fi
-        print_success "GPU 加速已启用"
+        if [ "$ENABLE_GPU" = true ]; then
+            print_success "GPU 加速已启用"
+        fi
     else
         ENABLE_GPU=false
         print_info "已跳过 GPU 加速，将使用 CPU 模式"
+    fi
+}
+
+# 加载测试环境配置（GPU 选择等）
+load_test_env() {
+    if [ -f "$TEST_ENV_FILE" ]; then
+        # shellcheck source=/dev/null
+        . "$TEST_ENV_FILE"
+    else
+        ENABLE_GPU=false
+    fi
+}
+
+# 保存测试环境配置
+save_test_env() {
+    echo "# yolo-label 测试环境配置（自动生成）" > "$TEST_ENV_FILE"
+    echo "ENABLE_GPU=${ENABLE_GPU}" >> "$TEST_ENV_FILE"
+}
+
+# 获取测试环境 compose 参数（根据是否启用 GPU）
+get_compose_test_args() {
+    load_test_env
+    if [ "$ENABLE_GPU" = true ] && [ -f "$COMPOSE_GPU" ]; then
+        echo "-f" "$COMPOSE_BASE" "-f" "$COMPOSE_DEV" "-f" "$COMPOSE_GPU"
+    else
+        echo "-f" "$COMPOSE_BASE" "-f" "$COMPOSE_DEV"
     fi
 }
 
@@ -618,12 +714,14 @@ services:
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
+      - TRAINING_OUTPUT_DIR=/app/training_output
       - QT_QPA_PLATFORM=offscreen
       - DISPLAY=
     volumes:
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
       - models_data:/app/models
+      - training_output_data:/app/training_output
     ports:
       - "${BACKEND_PORT}:8000"
     depends_on:
@@ -639,12 +737,15 @@ services:
       dockerfile: Dockerfile
     container_name: yolo-label-celery-worker
     restart: always
+    shm_size: '${SHM_SIZE:-4gb}'
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
+      - TRAINING_OUTPUT_DIR=/app/training_output
+      - TRAINING_WORKERS=\${TRAINING_WORKERS:-}
       - QT_QPA_PLATFORM=offscreen
       - DISPLAY=
 ${gpu_env_section}
@@ -652,6 +753,7 @@ ${gpu_env_section}
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
       - models_data:/app/models
+      - training_output_data:/app/training_output
     depends_on:
       db:
         condition: service_healthy
@@ -678,6 +780,7 @@ volumes:
   uploads_data:
   annotations_data:
   models_data:
+  training_output_data:
 COMPOSEFILE
 
     print_success "Docker Compose 配置已生成: docker-compose.prod.yml"
@@ -688,7 +791,7 @@ COMPOSEFILE
 stop_containers() {
     local compose_file="$1"
     if [ -f "$compose_file" ]; then
-        docker-compose -f "$compose_file" down 2>/dev/null || true
+        $DOCKER_COMPOSE -f "$compose_file" down 2>/dev/null || true
     fi
     # 强制清理残留容器
     local containers
@@ -703,7 +806,7 @@ stop_containers() {
 
 # 停止测试环境容器
 stop_test_containers() {
-    docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" down 2>/dev/null || true
+    $DOCKER_COMPOSE $(get_compose_test_args) down 2>/dev/null || true
     local containers
     containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "yolo-label" || true)
     if [ -n "$containers" ]; then
@@ -717,9 +820,9 @@ stop_test_containers() {
 # 完全清理（容器 + 数据卷 + 配置文件）
 cleanup_all_prod() {
     if [ -f "$COMPOSE_PROD" ]; then
-        docker-compose -f "$COMPOSE_PROD" down -v 2>/dev/null || true
+        $DOCKER_COMPOSE -f "$COMPOSE_PROD" down -v 2>/dev/null || true
     fi
-    docker-compose -f "$COMPOSE_BASE" down -v 2>/dev/null || true
+    $DOCKER_COMPOSE -f "$COMPOSE_BASE" down -v 2>/dev/null || true
 
     local containers
     containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "yolo-label" || true)
@@ -741,7 +844,7 @@ cleanup_all_prod() {
 
 # 完全清理测试环境
 cleanup_all_test() {
-    docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" down -v 2>/dev/null || true
+    $DOCKER_COMPOSE $(get_compose_test_args) down -v 2>/dev/null || true
 
     local containers
     containers=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep "yolo-label" || true)
@@ -1021,7 +1124,7 @@ cmd_prod_deploy() {
     echo ""
     print_info "开始构建 Docker 镜像（首次构建可能需要 10-30 分钟）..."
     echo ""
-    if ! docker-compose -f "$COMPOSE_PROD" build; then
+    if ! $DOCKER_COMPOSE -f "$COMPOSE_PROD" build; then
         print_error "镜像构建失败！请检查网络连接和磁盘空间"
         exit 1
     fi
@@ -1029,7 +1132,7 @@ cmd_prod_deploy() {
 
     echo ""
     print_info "启动所有服务..."
-    if ! docker-compose -f "$COMPOSE_PROD" up -d; then
+    if ! $DOCKER_COMPOSE -f "$COMPOSE_PROD" up -d; then
         print_error "服务启动失败！查看日志: docker-compose -f docker-compose.prod.yml logs"
         exit 1
     fi
@@ -1118,7 +1221,7 @@ cmd_prod_redeploy() {
 
     echo ""
     print_info "重新构建 Docker 镜像..."
-    if ! docker-compose -f "$COMPOSE_PROD" build; then
+    if ! $DOCKER_COMPOSE -f "$COMPOSE_PROD" build; then
         print_error "镜像构建失败！"
         exit 1
     fi
@@ -1126,7 +1229,7 @@ cmd_prod_redeploy() {
 
     echo ""
     print_info "启动所有服务..."
-    if ! docker-compose -f "$COMPOSE_PROD" up -d; then
+    if ! $DOCKER_COMPOSE -f "$COMPOSE_PROD" up -d; then
         print_error "服务启动失败！"
         exit 1
     fi
@@ -1156,7 +1259,7 @@ cmd_prod_restart() {
     load_prod_config || true
 
     print_info "正在重启所有生产环境服务..."
-    docker-compose -f "$COMPOSE_PROD" restart
+    $DOCKER_COMPOSE -f "$COMPOSE_PROD" restart
     print_success "所有服务已重启"
 
     echo ""
@@ -1240,15 +1343,20 @@ cmd_test_deploy() {
     check_docker
     print_success "Docker 环境检查通过"
 
+    # 检测并选择是否启用 GPU
+    echo ""
+    detect_gpu
+    save_test_env
+
     echo ""
     print_info "开始构建 Docker 镜像（首次构建可能需要 10-30 分钟）..."
     echo ""
 
     # 清理旧容器（如果有残留）
-    docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" down 2>/dev/null || true
+    $DOCKER_COMPOSE $(get_compose_test_args) down 2>/dev/null || true
 
     # 构建镜像
-    if ! docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" build; then
+    if ! $DOCKER_COMPOSE $(get_compose_test_args) build; then
         print_error "镜像构建失败！请检查网络连接和磁盘空间"
         exit 1
     fi
@@ -1256,7 +1364,7 @@ cmd_test_deploy() {
 
     echo ""
     print_info "启动测试环境服务..."
-    if ! docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" up -d; then
+    if ! $DOCKER_COMPOSE $(get_compose_test_args) up -d; then
         print_error "服务启动失败！"
         exit 1
     fi
@@ -1268,7 +1376,6 @@ cmd_test_deploy() {
     init_database
 
     echo ""
-    ENABLE_GPU=false
     local all_healthy=true
     health_check "$DEFAULT_FRONTEND_PORT" "$DEFAULT_BACKEND_PORT" || all_healthy=false
     print_summary "测试环境" "$DEFAULT_FRONTEND_PORT" "$DEFAULT_BACKEND_PORT" "$all_healthy"
@@ -1280,6 +1387,14 @@ cmd_test_redeploy() {
     echo -e "  ${BOLD}模式：${CYAN}重复测试环境部署${NC}"
 
     check_docker
+    load_test_env
+
+    echo ""
+    echo -e "  ${BOLD}当前 GPU 设置：${NC}${ENABLE_GPU}"
+    if confirm_no "是否重新选择 GPU 设置？"; then
+        detect_gpu
+        save_test_env
+    fi
 
     echo ""
     echo -e "  ${BOLD}请选择重新部署方式：${NC}"
@@ -1314,7 +1429,7 @@ cmd_test_redeploy() {
 
     echo ""
     print_info "重新构建 Docker 镜像..."
-    if ! docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" build; then
+    if ! $DOCKER_COMPOSE $(get_compose_test_args) build; then
         print_error "镜像构建失败！"
         exit 1
     fi
@@ -1322,7 +1437,7 @@ cmd_test_redeploy() {
 
     echo ""
     print_info "启动测试环境服务..."
-    if ! docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" up -d; then
+    if ! $DOCKER_COMPOSE $(get_compose_test_args) up -d; then
         print_error "服务启动失败！"
         exit 1
     fi
@@ -1333,7 +1448,6 @@ cmd_test_redeploy() {
     init_database
 
     echo ""
-    ENABLE_GPU=false
     local all_healthy=true
     health_check "$DEFAULT_FRONTEND_PORT" "$DEFAULT_BACKEND_PORT" || all_healthy=false
     print_summary "测试环境" "$DEFAULT_FRONTEND_PORT" "$DEFAULT_BACKEND_PORT" "$all_healthy"
@@ -1345,6 +1459,7 @@ cmd_test_restart() {
     echo -e "  ${BOLD}模式：${CYAN}测试环境重启${NC}"
 
     check_docker
+    load_test_env
 
     if ! has_any_containers; then
         print_error "未检测到 yolo-label 容器，请先部署: ./manage.sh test deploy"
@@ -1352,11 +1467,10 @@ cmd_test_restart() {
     fi
 
     print_info "正在重启所有测试环境服务..."
-    docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" restart
+    $DOCKER_COMPOSE $(get_compose_test_args) restart
     print_success "所有服务已重启"
 
     echo ""
-    ENABLE_GPU=false
     local all_healthy=true
     health_check "$DEFAULT_FRONTEND_PORT" "$DEFAULT_BACKEND_PORT" || all_healthy=false
 
@@ -1393,6 +1507,7 @@ cmd_test_clean() {
         echo "$images" | xargs -r docker rmi -f 2>/dev/null || true
     fi
 
+    rm -f "$TEST_ENV_FILE"
     print_success "测试环境已完全清理"
     echo ""
     print_info "如需重新部署: ./manage.sh test deploy"
@@ -1503,7 +1618,12 @@ if ! command -v docker &> /dev/null; then
     echo -e "${RED}错误: 未安装 Docker，请先安装 Docker${NC}"
     exit 1
 fi
-if ! command -v docker-compose &> /dev/null && ! docker compose version &>/dev/null 2>&1; then
+# 检测 compose 命令（兼容 docker-compose 和 docker compose V2）
+if command -v docker-compose &>/dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif docker compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
     echo -e "${RED}错误: 未安装 Docker Compose，请先安装${NC}"
     exit 1
 fi
@@ -1522,7 +1642,8 @@ if [ -n "$EXISTING" ]; then
         1)
             echo "停止旧服务..."
             cd offline-deploy 2>/dev/null || true
-            docker-compose down 2>/dev/null || true
+            $DOCKER_COMPOSE -f docker-compose.yml -f docker-compose.gpu.yml down 2>/dev/null || true
+            $DOCKER_COMPOSE -f docker-compose.yml down 2>/dev/null || true
             cd "$SCRIPT_DIR"
             docker ps -a --format '{{.Names}}' | grep "yolo-label" | xargs -r docker stop 2>/dev/null || true
             docker ps -a --format '{{.Names}}' | grep "yolo-label" | xargs -r docker rm -f 2>/dev/null || true
@@ -1530,7 +1651,8 @@ if [ -n "$EXISTING" ]; then
         2)
             echo "清除旧部署..."
             cd offline-deploy 2>/dev/null || true
-            docker-compose down -v 2>/dev/null || true
+            $DOCKER_COMPOSE -f docker-compose.yml -f docker-compose.gpu.yml down -v 2>/dev/null || true
+            $DOCKER_COMPOSE -f docker-compose.yml down -v 2>/dev/null || true
             cd "$SCRIPT_DIR"
             docker ps -a --format '{{.Names}}' | grep "yolo-label" | xargs -r docker stop 2>/dev/null || true
             docker ps -a --format '{{.Names}}' | grep "yolo-label" | xargs -r docker rm -f 2>/dev/null || true
@@ -1564,15 +1686,20 @@ if [ -d "offline-deploy" ]; then
     cd offline-deploy
 fi
 
-# 3. 检查 GPU
+# 3. 检查 GPU 并选择是否启用
 echo ""
 echo -e "${GREEN}步骤 2: 检查 GPU 支持...${NC}"
+ENABLE_GPU=false
 if command -v nvidia-smi &> /dev/null; then
-    echo "检测到 NVIDIA GPU"
     if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &> /dev/null 2>&1; then
-        echo -e "${GREEN}✔ NVIDIA Container Toolkit 已安装${NC}"
+        echo -e "${GREEN}✔ 检测到 NVIDIA GPU 且容器可用${NC}"
+        read -r -p "是否启用 GPU 加速？[Y/n]: " gpu_choice
+        gpu_choice="${gpu_choice:-Y}"
+        if [[ "$gpu_choice" =~ ^[Yy]$ ]]; then
+            ENABLE_GPU=true
+        fi
     else
-        echo -e "${YELLOW}⚠ GPU 功能将不可用，但 CPU 模式仍可工作${NC}"
+        echo -e "${YELLOW}⚠ 检测到 GPU 但容器不可用，将使用 CPU 模式${NC}"
     fi
 else
     echo "未检测到 GPU，将使用 CPU 模式"
@@ -1581,7 +1708,11 @@ fi
 # 4. 启动服务
 echo ""
 echo -e "${GREEN}步骤 3: 启动服务...${NC}"
-docker-compose up -d
+if [ "$ENABLE_GPU" = true ] && [ -f "docker-compose.gpu.yml" ]; then
+    $DOCKER_COMPOSE -f docker-compose.yml -f docker-compose.gpu.yml up -d
+else
+    $DOCKER_COMPOSE -f docker-compose.yml up -d
+fi
 echo -e "${GREEN}✔ 服务已启动${NC}"
 
 # 5. 等待并初始化数据库
@@ -1621,7 +1752,7 @@ echo -e "  常用命令:"
 echo -e "    查看状态  docker-compose ps"
 echo -e "    查看日志  docker logs -f yolo-label-backend"
 echo -e "    停止服务  docker-compose down"
-echo -e "    启动服务  docker-compose up -d"
+echo -e "    启动服务  $DOCKER_COMPOSE up -d"
 echo ""
 DEPLOY_SCRIPT
     chmod +x "$PACKAGE_DIR/deploy.sh"
@@ -1689,7 +1820,7 @@ cmd_offline_deploy() {
         print_error "未安装 Docker，请先安装 Docker"
         exit 1
     fi
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &>/dev/null 2>&1; then
+    if [ -z "$DOCKER_COMPOSE" ]; then
         print_error "未安装 Docker Compose，请先安装"
         exit 1
     fi
@@ -1754,7 +1885,7 @@ cmd_offline_deploy() {
     # 启动服务
     print_step "3/3" "启动服务并初始化"
     print_info "启动服务..."
-    docker-compose -f "$COMPOSE_BASE" up -d
+    $DOCKER_COMPOSE -f "$COMPOSE_BASE" up -d
     print_success "服务已启动"
 
     sleep 10
@@ -1810,8 +1941,10 @@ cmd_status() {
         fi
     else
         print_info "检测到测试/开发环境配置"
+        load_test_env
         echo -e "    前端端口: ${CYAN}${DEFAULT_FRONTEND_PORT}${NC}"
         echo -e "    后端端口: ${CYAN}${DEFAULT_BACKEND_PORT}${NC}"
+        echo -e "    GPU 加速: ${CYAN}${ENABLE_GPU}${NC}"
     fi
 
     # 磁盘使用
@@ -1840,9 +1973,9 @@ cmd_logs() {
     else
         # 显示所有服务日志
         if [ -f "$COMPOSE_PROD" ]; then
-            docker-compose -f "$COMPOSE_PROD" logs -f --tail 50
+            $DOCKER_COMPOSE -f "$COMPOSE_PROD" logs -f --tail 50
         elif has_any_containers; then
-            docker-compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" logs -f --tail 50
+            $DOCKER_COMPOSE $(get_compose_test_args) logs -f --tail 50
         else
             print_error "未检测到运行中的服务"
         fi

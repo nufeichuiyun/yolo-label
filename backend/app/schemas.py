@@ -243,3 +243,45 @@ class TaskStats(BaseModel):
     task_id: int
     total_images: int  # 任务包总图片数
     annotated_images: int  # 已标注图片数
+
+
+# 训练任务相关
+class TrainingTaskCreate(BaseModel):
+    project_id: int
+    base_model: Optional[str] = None  # 不传则按项目类型自动选择
+    epochs: Optional[int] = 100
+    imgsz: Optional[int] = 640
+    batch: Optional[int] = 16
+    train_split: Optional[float] = 0.8
+
+
+class TrainingTaskMetrics(BaseModel):
+    """训练实时指标（从 Redis 读取）"""
+    epoch: Optional[int] = None
+    loss: Optional[float] = None
+    map50: Optional[float] = None
+    map50_95: Optional[float] = None
+    lr: Optional[float] = None
+
+
+class TrainingTaskResponse(BaseModel):
+    id: int
+    project_id: int
+    base_model: str
+    task_id: str
+    status: str  # pending, running, completed, failed
+    progress: int
+    epochs: int
+    current_epoch: int
+    train_images: int
+    val_images: int
+    error_message: Optional[str] = None
+    output_model_path: Optional[str] = None
+    output_archive_path: Optional[str] = None
+    created_by: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+    latest_metrics: Optional[TrainingTaskMetrics] = None  # 实时指标，仅运行中任务有
+
+    class Config:
+        from_attributes = True
