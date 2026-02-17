@@ -177,7 +177,7 @@ async def assign_task(
     
     # 分配任务包
     task.annotator_id = assign_data.annotator_id
-    task.status = "pending"
+    task.status = "assigned"
     db.commit()
     db.refresh(task)
     

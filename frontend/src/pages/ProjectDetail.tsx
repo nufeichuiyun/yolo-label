@@ -982,6 +982,7 @@ export default function ProjectDetail() {
                     render: (status: string) => {
                       const statusMap: Record<string, { text: string; color: string }> = {
                         pending: { text: '待分配', color: 'orange' },
+                        assigned: { text: '已分配', color: 'blue' },
                         in_progress: { text: '进行中', color: 'blue' },
                         completed: { text: '已完成', color: 'green' },
                       }
