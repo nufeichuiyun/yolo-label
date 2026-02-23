@@ -91,6 +91,8 @@ export default function Annotation() {
   const hasActivePolygonRef = useRef<boolean>(false)
   // 用于跟踪当前是否有选中的标注（矩形或多边形），点击空白时用于取消选择
   const hasActiveAnnotationRef = useRef<boolean>(false)
+  // 用于跟踪当前选中的顶点索引（用于 Delete 删除顶点）
+  const selectedVertexIndexRef = useRef<number | null>(null)
 
   // 更新预览图片列表（当前图片前后各5张）
   const updatePreviewImages = useCallback((images: Image[], currentImageId: number) => {
@@ -307,11 +309,17 @@ export default function Annotation() {
       } else if (obj.type === 'polygon') {
         const polygon = obj as fabric.Polygon
         const points = polygon.points || []
+        const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+        const transformMatrix = polygon.calcTransformMatrix()
         const normalizedPoints = points.map((point) => {
-          const canvasX = (polygon.left || 0) + point.x
-          const canvasY = (polygon.top || 0) + point.y
-          const originalX = canvasX / scaleX
-          const originalY = canvasY / scaleY
+          const localX = point.x - pathOffset.x
+          const localY = point.y - pathOffset.y
+          const canvasPoint = fabric.util.transformPoint(
+            { x: localX, y: localY },
+            transformMatrix
+          )
+          const originalX = canvasPoint.x / scaleX
+          const originalY = canvasPoint.y / scaleY
           const normalizedX = originalX / originalImgWidth
           const normalizedY = originalY / originalImgHeight
           return [normalizedX, normalizedY]
@@ -397,13 +405,20 @@ export default function Annotation() {
       // 多边形：转换为polygon格式
       const polygon = obj as fabric.Polygon
       const points = polygon.points || []
+      const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+      const transformMatrix = polygon.calcTransformMatrix()
       
       // 将canvas坐标转换为归一化的原图坐标
+      // polygon.points 使用 pathOffset，需通过 transformMatrix 得到正确的 canvas 坐标
       const normalizedPoints = points.map((point) => {
-        // polygon的points是相对于polygon的left/top的局部坐标
-        // 需要加上polygon的left/top得到canvas坐标
-        const canvasX = (polygon.left || 0) + point.x
-        const canvasY = (polygon.top || 0) + point.y
+        const localX = point.x - pathOffset.x
+        const localY = point.y - pathOffset.y
+        const canvasPoint = fabric.util.transformPoint(
+          { x: localX, y: localY },
+          transformMatrix
+        )
+        const canvasX = canvasPoint.x
+        const canvasY = canvasPoint.y
         
         // 减去背景图片偏移，得到相对于背景图片的坐标
         const relativeX = canvasX - bgImageLeft
@@ -808,6 +823,197 @@ export default function Annotation() {
     return inside
   }, [])
   
+  /**
+   * 为多边形创建顶点和边控制点（支持拖拽顶点、边中点添加顶点）
+   * 增删顶点后需调用 onRebuildControls 重新应用控制点
+   */
+  const createPolygonControls = useCallback((
+    polygon: fabric.Polygon,
+    options: {
+      canvas: fabric.Canvas
+      categoryColor: string
+      isSegmentation: boolean
+      enableEdgeControls?: boolean  // 是否显示边中点控制点（用于添加顶点）
+      selectedVertexIndexRef?: React.MutableRefObject<number | null>  // 用于顶点选中样式
+      onModified?: () => void
+      onRebuildControls?: (poly: fabric.Polygon) => void
+    }
+  ) => {
+    const { canvas, categoryColor, isSegmentation, enableEdgeControls = true, selectedVertexIndexRef, onModified, onRebuildControls } = options
+    polygon.controls = {}
+    
+    const polygonPoints = polygon.points || []
+    
+    // 顶点控制点
+    polygonPoints.forEach((point: any, index: number) => {
+      const controlName = `point${index}`
+      const control = new fabric.Control({
+        x: 0.5,
+        y: 0.5,
+        actionHandler: (eventData: any, transformData: any, x: number, y: number) => {
+          const bgImage = canvas.backgroundImage as fabric.Image
+          if (bgImage && bgImage.width && bgImage.height) {
+            const imageLeft = bgImage.left || 0
+            const imageTop = bgImage.top || 0
+            const imageWidth = bgImage.width * (bgImage.scaleX || 1)
+            const imageHeight = bgImage.height * (bgImage.scaleY || 1)
+            x = Math.max(imageLeft, Math.min(imageLeft + imageWidth, x))
+            y = Math.max(imageTop, Math.min(imageTop + imageHeight, y))
+          }
+          
+          const transformMatrix = polygon.calcTransformMatrix()
+          const localPoint = fabric.util.transformPoint({ x, y } as any, fabric.util.invertTransform(transformMatrix))
+          const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+          const pointX = localPoint.x + pathOffset.x
+          const pointY = localPoint.y + pathOffset.y
+          
+          const polygonPointsArray = polygon.points || []
+          let anchorIndex = index === 0 && polygonPointsArray.length > 1 ? 1 : 0
+          const anchorPoint = polygonPointsArray[anchorIndex]
+          if (!anchorPoint) return true
+          
+          const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+          const anchorLocalX = anchorPoint.x - oldPathOffset.x
+          const anchorLocalY = anchorPoint.y - oldPathOffset.y
+          const oldTransformMatrix = polygon.calcTransformMatrix()
+          const anchorAbsolute = fabric.util.transformPoint(
+            { x: anchorLocalX, y: anchorLocalY },
+            oldTransformMatrix
+          )
+          
+          if (polygonPointsArray[index]) {
+            polygonPointsArray[index].x = pointX
+            polygonPointsArray[index].y = pointY
+          }
+          polygon.set({ points: polygonPointsArray })
+          polygon._setPositionDimensions({})
+          ;(polygon as any).dirty = true
+          if ((polygon as any)._setPath) delete (polygon as any)._setPath
+          
+          const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+          const newAnchorLocalX = anchorPoint.x - newPathOffset.x
+          const newAnchorLocalY = anchorPoint.y - newPathOffset.y
+          const newTransformMatrix = polygon.calcTransformMatrix()
+          const newAnchorAbsolute = fabric.util.transformPoint(
+            { x: newAnchorLocalX, y: newAnchorLocalY },
+            newTransformMatrix
+          )
+          const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
+          const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
+          if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
+            polygon.set({
+              left: (polygon.left || 0) + deltaX,
+              top: (polygon.top || 0) + deltaY
+            })
+            polygon.setCoords()
+          }
+          polygon.setCoords()
+          canvas.renderAll()
+          onModified?.()
+          return true
+        },
+        actionName: 'modifyPolygon',
+        pointIndex: index,
+        render: (ctx: CanvasRenderingContext2D, left: number, top: number, styleOverride: any) => {
+          ctx.save()
+          const isSelected = selectedVertexIndexRef?.current === index
+          ctx.fillStyle = categoryColor
+          ctx.strokeStyle = '#fff'
+          ctx.lineWidth = isSelected ? 3 : 2
+          const radius = isSelected ? 7 : 5
+          ctx.beginPath()
+          ctx.arc(left, top, radius, 0, 2 * Math.PI)
+          ctx.fill()
+          ctx.stroke()
+          ctx.restore()
+        },
+        cursorStyle: 'move',
+      })
+      
+      control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
+        const poly = fabricObject as fabric.Polygon
+        const pt = poly.points?.[index]
+        if (!pt) return { x: 0, y: 0 }
+        const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
+        const pointLocalX = pt.x - pathOffset.x
+        const pointLocalY = pt.y - pathOffset.y
+        const cvs = (fabricObject as any).canvas
+        const vpt = cvs?.viewportTransform
+        const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+        const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+          ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+          : objMatrix
+        return fabric.util.transformPoint({ x: pointLocalX, y: pointLocalY }, screenMatrix)
+      }
+      
+      polygon.controls[controlName] = control
+    })
+    
+    // 边中点控制点（用于添加顶点）
+    if (enableEdgeControls && polygonPoints.length >= 3) {
+      polygonPoints.forEach((point: any, index: number) => {
+        const nextIndex = (index + 1) % polygonPoints.length
+        const p1 = polygonPoints[index]
+        const p2 = polygonPoints[nextIndex]
+        if (!p1 || !p2) return
+        
+        const controlName = `edge${index}`
+        const control = new fabric.Control({
+          x: 0.5,
+          y: 0.5,
+          // 不在 actionHandler 中插入顶点（拖动会多次触发），改为在 mouse:down 中检测边点击并插入
+          actionHandler: () => true,
+          actionName: 'addPolygonVertex',
+          render: (ctx: CanvasRenderingContext2D, left: number, top: number) => {
+            ctx.save()
+            ctx.fillStyle = '#fff'
+            ctx.strokeStyle = categoryColor
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(left, top, 4, 0, 2 * Math.PI)
+            ctx.fill()
+            ctx.stroke()
+            ctx.restore()
+          },
+          cursorStyle: 'crosshair',
+        })
+        
+        control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
+          const poly = fabricObject as fabric.Polygon
+          const pts = poly.points || []
+          const pA = pts[index]
+          const pB = pts[nextIndex]
+          if (!pA || !pB) return { x: 0, y: 0 }
+          const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
+          const midX = (pA.x + pB.x) / 2 - pathOffset.x
+          const midY = (pA.y + pB.y) / 2 - pathOffset.y
+          const cvs = (fabricObject as any).canvas
+          const vpt = cvs?.viewportTransform
+          const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
+          const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
+            ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
+            : objMatrix
+          return fabric.util.transformPoint({ x: midX, y: midY }, screenMatrix)
+        }
+        
+        polygon.controls[controlName] = control
+      })
+    }
+    
+    polygon.containsPoint = function(point: fabric.Point): boolean {
+      const points = this.points || []
+      if (points.length < 3) return false
+      const pathOffset = (this as any).pathOffset || { x: 0, y: 0 }
+      const transformMatrix = this.calcTransformMatrix()
+      const canvasPoints = points.map((p: any) => {
+        const px = p.x - pathOffset.x
+        const py = p.y - pathOffset.y
+        return fabric.util.transformPoint({ x: px, y: py }, transformMatrix)
+      })
+      return isPointInPolygon(point, canvasPoints)
+    }
+  }, [isPointInPolygon])
+  
   // 完成多边形绘制
   const finishPolygonDrawing = useCallback(() => {
     if (!fabricCanvasRef.current || !isDrawingPolygonRef.current || polygonPointsRef.current.length < 3) {
@@ -889,174 +1095,18 @@ export default function Annotation() {
     })
     ;(polygon as any)._baseStrokeWidth = polygonBaseStroke
     
-    // 清除所有默认控制点，只保留自定义的顶点控制点
-    polygon.controls = {}
-    
-    // 为每个顶点添加控制点
-    const polygonPoints = polygon.points || []
-    polygonPoints.forEach((point: any, index: number) => {
-      const controlName = `point${index}`
-      // 创建顶点控制点
-      const control = new fabric.Control({
-        x: 0.5,
-        y: 0.5,
-        actionHandler: (eventData: any, transformData: any, x: number, y: number) => {
-          // x, y 是 canvas 坐标（控制点的新位置）
-          // 需要转换为多边形局部坐标（相对于左上角）
-          const transformMatrix = polygon.calcTransformMatrix()
-          const invertedMatrix = fabric.util.invertTransform(transformMatrix)
-          const localPoint = fabric.util.transformPoint(
-            { x, y } as any,
-            invertedMatrix
-          )
-          
-          // 获取 pathOffset
-          const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-          
-          // localPoint 现在是相对于对象中心的坐标
-          // 需要转换为相对于左上角的坐标
-          const pointX = localPoint.x + pathOffset.x
-          const pointY = localPoint.y + pathOffset.y
-          
-          // 选择一个锚点（选择第一个不是当前被拖动顶点的顶点）
-          const polygonPointsArray = polygon.points || []
-          let anchorIndex = 0
-          if (index === 0 && polygonPointsArray.length > 1) {
-            anchorIndex = 1
-          }
-          const anchorPoint = polygonPointsArray[anchorIndex]
-          
-          if (!anchorPoint) {
-            return true
-          }
-          
-          // 计算锚点的绝对位置（在更新之前）
-          const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-          const anchorLocalX = anchorPoint.x - oldPathOffset.x
-          const anchorLocalY = anchorPoint.y - oldPathOffset.y
-          const oldTransformMatrix = polygon.calcTransformMatrix()
-          const anchorAbsolute = fabric.util.transformPoint(
-            { x: anchorLocalX, y: anchorLocalY },
-            oldTransformMatrix
-          )
-          
-          // 更新被拖动的顶点位置
-          if (polygonPointsArray[index]) {
-            polygonPointsArray[index].x = pointX
-            polygonPointsArray[index].y = pointY
-          }
-          
-          // 更新多边形并强制刷新路径
-          polygon.set({ points: polygonPointsArray })
-          
-          // 重新计算边界框和 pathOffset
-          polygon._setPositionDimensions({})
-          
-          // 强制标记为需要重新渲染
-          ;(polygon as any).dirty = true
-          // 清除路径缓存，强制重新计算路径
-          if ((polygon as any)._setPath) {
-            delete (polygon as any)._setPath
-          }
-          
-          // 获取新的 pathOffset
-          const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-          
-          // 计算锚点的新相对位置（相对于新的 pathOffset）
-          const newAnchorLocalX = anchorPoint.x - newPathOffset.x
-          const newAnchorLocalY = anchorPoint.y - newPathOffset.y
-          
-          // 计算新的变换矩阵（使用当前的 left/top）
-          const newTransformMatrix = polygon.calcTransformMatrix()
-          const newAnchorAbsolute = fabric.util.transformPoint(
-            { x: newAnchorLocalX, y: newAnchorLocalY },
-            newTransformMatrix
-          )
-          
-          // 计算需要调整的偏移量
-          const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
-          const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
-          
-          if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
-            // 调整 left/top 以保持锚点的绝对位置不变
-            polygon.set({
-              left: (polygon.left || 0) + deltaX,
-              top: (polygon.top || 0) + deltaY
-            })
-            polygon.setCoords()
-          }
-          
-          polygon.setCoords()
-          
-          // 立即渲染，确保路径更新可见
-          canvas.renderAll()
-          
-          return true
-        },
-        actionName: 'modifyPolygon',
-        pointIndex: index,
-        render: (ctx: CanvasRenderingContext2D, left: number, top: number, styleOverride: any, fabricObject: fabric.Object) => {
-          ctx.save()
-          ctx.fillStyle = categoryColor
-          ctx.strokeStyle = '#fff'
-          ctx.lineWidth = 2
-          ctx.beginPath()
-          ctx.arc(left, top, 5, 0, 2 * Math.PI)
-          ctx.fill()
-          ctx.stroke()
-          ctx.restore()
-        },
-        cursorStyle: 'move',
-      })
-      
-      // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
-      control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
-        const poly = fabricObject as fabric.Polygon
-        const point = poly.points[index]
-        if (!point) return { x: 0, y: 0 }
-        const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-        const pointLocalX = point.x - pathOffset.x
-        const pointLocalY = point.y - pathOffset.y
-        const canvas = (fabricObject as any).canvas
-        const vpt = canvas?.viewportTransform
-        const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
-        const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
-          ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
-          : objMatrix
-        return fabric.util.transformPoint(
-          { x: pointLocalX, y: pointLocalY },
-          screenMatrix
-        )
-      }
-      
-      polygon.controls[controlName] = control
-    })
-    
-    // 覆盖 containsPoint 方法，使用点在多边形内的算法（而不是边界框）
-    polygon.containsPoint = function(point: fabric.Point, absolute?: boolean, calculate?: boolean): boolean {
-      // 获取多边形的所有顶点（canvas坐标）
-      const points = this.points || []
-      if (points.length < 3) {
-        return false
-      }
-      
-      // 获取 pathOffset
-      const pathOffset = (this as any).pathOffset || { x: 0, y: 0 }
-      
-      // 将多边形的局部坐标顶点转换为 canvas 坐标
-      const transformMatrix = this.calcTransformMatrix()
-      const canvasPoints = points.map((p: any) => {
-        const pointLocalX = p.x - pathOffset.x
-        const pointLocalY = p.y - pathOffset.y
-        return fabric.util.transformPoint(
-          { x: pointLocalX, y: pointLocalY },
-          transformMatrix
-        )
-      })
-      
-      // 使用射线法判断点是否在多边形内
-      return isPointInPolygon(point, canvasPoints)
+    const baseOpts = {
+      canvas,
+      categoryColor,
+      isSegmentation,
+      enableEdgeControls: true,
+      selectedVertexIndexRef,
+      onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
     }
+    createPolygonControls(polygon, {
+      ...baseOpts,
+      onRebuildControls: (poly: fabric.Polygon) => createPolygonControls(poly, baseOpts),
+    })
     
     // 在多边形上存储类别ID
     ;(polygon as any).categoryId = currentSelectedCategory
@@ -1096,7 +1146,7 @@ export default function Annotation() {
         }
       }, 100)
     }
-  }, [clipPolygonToImageBounds]) // 移除saveCurrentAnnotations依赖，避免循环依赖
+  }, [clipPolygonToImageBounds, createPolygonControls]) // 移除saveCurrentAnnotations依赖，避免循环依赖
   
   // 删除多边形的最后一个顶点
   const removeLastPolygonPoint = useCallback(() => {
@@ -1766,29 +1816,79 @@ export default function Annotation() {
         e.preventDefault()
         navigateToImage('next')
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // 删除选中的标注对象（矩形或多边形）
         e.preventDefault()
         if (fabricCanvasRef.current) {
           const activeObject = fabricCanvasRef.current.getActiveObject()
-          if (activeObject && (activeObject.type === 'rect' || activeObject.type === 'polygon')) {
+          if (activeObject?.type === 'rect') {
             fabricCanvasRef.current.remove(activeObject)
             fabricCanvasRef.current.discardActiveObject()
             fabricCanvasRef.current.renderAll()
-            // 自动保存标注
-            console.log('删除标注后，准备保存')
-            if (saveCurrentAnnotationsRef.current) {
-              saveCurrentAnnotationsRef.current().catch(error => {
-                console.error('删除标注后保存失败:', error)
+            saveCurrentAnnotationsRef.current?.().catch(() => {})
+          } else if (activeObject?.type === 'polygon') {
+            const polygon = activeObject as fabric.Polygon
+            const points = polygon.points || []
+            const idx = selectedVertexIndexRef.current
+            
+            // 若已选中顶点且顶点数>3，则删除该顶点；否则删除整个多边形
+            if (idx !== null && idx >= 0 && idx < points.length && points.length > 3) {
+              const anchorIndex = idx === 0 ? 1 : 0
+              const anchorPoint = points[anchorIndex]
+              const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+              const transformMatrix = polygon.calcTransformMatrix()
+              const anchorLocalX = anchorPoint.x - oldPathOffset.x
+              const anchorLocalY = anchorPoint.y - oldPathOffset.y
+              const anchorAbsolute = fabric.util.transformPoint(
+                { x: anchorLocalX, y: anchorLocalY },
+                transformMatrix
+              )
+              const newPoints = points.filter((_, i) => i !== idx)
+              polygon.set({ points: newPoints })
+              polygon._setPositionDimensions({})
+              ;(polygon as any).dirty = true
+              if ((polygon as any)._setPath) delete (polygon as any)._setPath
+              const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+              const newAnchorLocalX = anchorPoint.x - newPathOffset.x
+              const newAnchorLocalY = anchorPoint.y - newPathOffset.y
+              const newTransformMatrix = polygon.calcTransformMatrix()
+              const newAnchorAbsolute = fabric.util.transformPoint(
+                { x: newAnchorLocalX, y: newAnchorLocalY },
+                newTransformMatrix
+              )
+              const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
+              const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
+              if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
+                polygon.set({
+                  left: (polygon.left || 0) + deltaX,
+                  top: (polygon.top || 0) + deltaY
+                })
+              }
+              polygon.setCoords()
+              selectedVertexIndexRef.current = null
+              
+              const delCategoryColor = (polygon as any).categoryId
+                ? categoriesRef.current.find(c => c.id === (polygon as any).categoryId)?.color || '#FF0000'
+                : '#FF0000'
+              const delIsSeg = (projectRef.current || project)?.annotation_type === 'segmentation'
+              const delBaseOpts = {
+                canvas: fabricCanvasRef.current!,
+                categoryColor: delCategoryColor,
+                isSegmentation: delIsSeg,
+                enableEdgeControls: true,
+                selectedVertexIndexRef,
+                onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+              }
+              createPolygonControls(polygon, {
+                ...delBaseOpts,
+                onRebuildControls: (poly) => createPolygonControls(poly, delBaseOpts),
               })
+              fabricCanvasRef.current.renderAll()
+              saveCurrentAnnotationsRef.current?.().catch(() => {})
             } else {
-              // 延迟一下再尝试保存，等待ref被设置
-              setTimeout(() => {
-                if (saveCurrentAnnotationsRef.current) {
-                  saveCurrentAnnotationsRef.current().catch(error => {
-                    console.error('删除标注后保存失败:', error)
-                  })
-                }
-              }, 100)
+              fabricCanvasRef.current.remove(activeObject)
+              fabricCanvasRef.current.discardActiveObject()
+              fabricCanvasRef.current.renderAll()
+              selectedVertexIndexRef.current = null
+              saveCurrentAnnotationsRef.current?.().catch(() => {})
             }
           }
         }
@@ -1829,7 +1929,7 @@ export default function Annotation() {
     return () => {
       window.removeEventListener('keydown', handleKeyPress)
     }
-  }, [allImages, imageId, projectId, navigateToImage, saveCurrentAnnotations])
+  }, [allImages, imageId, projectId, navigateToImage, saveCurrentAnnotations, createPolygonControls, project])
 
   // 当图片列表或当前图片ID变化时，更新预览列表
   useEffect(() => {
@@ -2009,97 +2109,23 @@ export default function Annotation() {
             fill: polygon.fill
           })
           
-          // 清除所有默认控制点，只保留自定义的顶点控制点
-          polygon.controls = {}
-          
-          // 为每个顶点添加控制点
-          const polygonPoints = polygon.points || []
-          polygonPoints.forEach((point: any, index: number) => {
-            const controlName = `point${index}`
-            // 创建顶点控制点
-            const control = new fabric.Control({
-              x: 0.5,
-              y: 0.5,
-              actionHandler: (eventData: any, transformData: any, x: number, y: number) => {
-                // x, y 是 canvas 坐标，转换为多边形局部坐标
-                const localPoint = fabric.util.transformPoint(
-                  { x, y } as any,
-                  fabric.util.invertTransform(polygon.calcTransformMatrix())
-                )
-                
-                const polygonPointsArray = polygon.points || []
-                if (polygonPointsArray[index]) {
-                  polygonPointsArray[index].x = localPoint.x
-                  polygonPointsArray[index].y = localPoint.y
-                }
-                polygon.set({ points: polygonPointsArray })
-                polygon.setCoords()
-                return true
-              },
-              actionName: 'modifyPolygon',
-              pointIndex: index,
-              render: (ctx: CanvasRenderingContext2D, left: number, top: number, styleOverride: any, fabricObject: fabric.Object) => {
-                ctx.save()
-                ctx.fillStyle = categoryColor
-                ctx.strokeStyle = '#fff'
-                ctx.lineWidth = 2
-                ctx.beginPath()
-                ctx.arc(left, top, 5, 0, 2 * Math.PI)
-                ctx.fill()
-                ctx.stroke()
-                ctx.restore()
-              },
-              cursorStyle: 'move',
-            })
-            
-            // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
-            control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
-              const poly = fabricObject as fabric.Polygon
-              const point = poly.points[index]
-              if (!point) return { x: 0, y: 0 }
-              const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-              const pointLocalX = point.x - pathOffset.x
-              const pointLocalY = point.y - pathOffset.y
-              const canvas = (fabricObject as any).canvas
-              const vpt = canvas?.viewportTransform
-              const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
-              const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
-                ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
-                : objMatrix
-              return fabric.util.transformPoint(
-                { x: pointLocalX, y: pointLocalY },
-                screenMatrix
-              )
-            }
-            
-            polygon.controls[controlName] = control
-          })
-          
-          // 覆盖 containsPoint 方法，使用点在多边形内的算法（而不是边界框）
-          polygon.containsPoint = function(point: fabric.Point, absolute?: boolean, calculate?: boolean): boolean {
-            // 获取多边形的所有顶点（canvas坐标）
-            const points = this.points || []
-            if (points.length < 3) {
-              return false
-            }
-            
-            // 获取 pathOffset
-            const pathOffset = (this as any).pathOffset || { x: 0, y: 0 }
-            
-            // 将多边形的局部坐标顶点转换为 canvas 坐标
-            const transformMatrix = this.calcTransformMatrix()
-            const canvasPoints = points.map((p: any) => {
-              const pointLocalX = p.x - pathOffset.x
-              const pointLocalY = p.y - pathOffset.y
-              return fabric.util.transformPoint(
-                { x: pointLocalX, y: pointLocalY },
-                transformMatrix
-              )
-            })
-            
-            // 使用射线法判断点是否在多边形内
-            return isPointInPolygon(point, canvasPoints)
+          const drawOpts = {
+            canvas,
+            categoryColor,
+            isSegmentation,
+            enableEdgeControls: true,
+            selectedVertexIndexRef,
+            onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+            onRebuildControls: (poly: fabric.Polygon) => createPolygonControls(poly, {
+              canvas,
+              categoryColor,
+              isSegmentation,
+              enableEdgeControls: true,
+              selectedVertexIndexRef,
+              onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+            }),
           }
+          createPolygonControls(polygon, drawOpts)
           
           // 在多边形上存储类别ID和标注ID
           ;(polygon as any).categoryId = ann.category_id
@@ -2271,7 +2297,7 @@ export default function Annotation() {
         updateCategoryCountsRef.current()
       }
     }, 50)
-  }, [])
+  }, [createPolygonControls])
 
   // 当annotations或categories变化时，重新绘制已有标注
   useEffect(() => {
@@ -2501,171 +2527,22 @@ export default function Annotation() {
             })
             ;(polygon as any)._baseStrokeWidth = polyBase
             
-            // 先清除所有控制点
-            polygon.controls = {}
-            
-            // 清除所有现有控制点并重新创建顶点控制点
-            polygon.controls = {}
-            const points = polygon.points || []
-            const categoryColor = (polygon as any).categoryId 
+            const selCategoryColor = (polygon as any).categoryId 
               ? categoriesRef.current.find(c => c.id === (polygon as any).categoryId)?.color || '#FF0000'
               : '#FF0000'
-            
-            // 为每个顶点创建控制点
-            points.forEach((point: any, index: number) => {
-              const controlName = `point${index}`
-              // 创建顶点控制点
-              const control = new fabric.Control({
-                  x: 0.5,
-                  y: 0.5,
-                  actionHandler: (eventData: any, transformData: any, x: number, y: number) => {
-                    // x, y 是 canvas 坐标（控制点的新位置）
-                    // 先检查并裁剪到图片边界内
-                    const bgImage = canvas.backgroundImage as fabric.Image
-                    if (bgImage && bgImage.width && bgImage.height) {
-                      const imageLeft = bgImage.left || 0
-                      const imageTop = bgImage.top || 0
-                      const imageWidth = bgImage.width * (bgImage.scaleX || 1)
-                      const imageHeight = bgImage.height * (bgImage.scaleY || 1)
-                      const imageRight = imageLeft + imageWidth
-                      const imageBottom = imageTop + imageHeight
-                      
-                      // 裁剪到图片边界内
-                      x = Math.max(imageLeft, Math.min(imageRight, x))
-                      y = Math.max(imageTop, Math.min(imageBottom, y))
-                    }
-                    
-                    const transformMatrix = polygon.calcTransformMatrix()
-                    const invertedMatrix = fabric.util.invertTransform(transformMatrix)
-                    const localPoint = fabric.util.transformPoint(
-                      { x, y } as any,
-                      invertedMatrix
-                    )
-                    
-                    // 获取 pathOffset
-                    const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    
-                    // localPoint 现在是相对于对象中心的坐标
-                    // 需要转换为相对于左上角的坐标
-                    const pointX = localPoint.x + pathOffset.x
-                    const pointY = localPoint.y + pathOffset.y
-                    
-                    // 选择一个锚点（选择第一个不是当前被拖动顶点的顶点）
-                    const polygonPointsArray = polygon.points || []
-                    let anchorIndex = 0
-                    if (index === 0 && polygonPointsArray.length > 1) {
-                      anchorIndex = 1
-                    }
-                    const anchorPoint = polygonPointsArray[anchorIndex]
-                    
-                    if (!anchorPoint) {
-                      return true
-                    }
-                    
-                    // 计算锚点的绝对位置（在更新之前）
-                    const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    const anchorLocalX = anchorPoint.x - oldPathOffset.x
-                    const anchorLocalY = anchorPoint.y - oldPathOffset.y
-                    const oldTransformMatrix = polygon.calcTransformMatrix()
-                    const anchorAbsolute = fabric.util.transformPoint(
-                      { x: anchorLocalX, y: anchorLocalY },
-                      oldTransformMatrix
-                    )
-                    
-                    // 更新被拖动的顶点位置
-                    if (polygonPointsArray[index]) {
-                      polygonPointsArray[index].x = pointX
-                      polygonPointsArray[index].y = pointY
-                    }
-                    
-                    // 更新多边形并强制刷新路径
-                    polygon.set({ points: polygonPointsArray })
-                    
-                    // 重新计算边界框和 pathOffset
-                    polygon._setPositionDimensions({})
-                    
-                    // 强制标记为需要重新渲染
-                    ;(polygon as any).dirty = true
-                    // 清除路径缓存，强制重新计算路径
-                    if ((polygon as any)._setPath) {
-                      delete (polygon as any)._setPath
-                    }
-                    
-                    // 获取新的 pathOffset
-                    const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    
-                    // 计算锚点的新相对位置（相对于新的 pathOffset）
-                    const newAnchorLocalX = anchorPoint.x - newPathOffset.x
-                    const newAnchorLocalY = anchorPoint.y - newPathOffset.y
-                    
-                    // 计算新的变换矩阵（使用当前的 left/top）
-                    const newTransformMatrix = polygon.calcTransformMatrix()
-                    const newAnchorAbsolute = fabric.util.transformPoint(
-                      { x: newAnchorLocalX, y: newAnchorLocalY },
-                      newTransformMatrix
-                    )
-                    
-                    // 计算需要调整的偏移量
-                    const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
-                    const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
-                    
-                    if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
-                      // 调整 left/top 以保持锚点的绝对位置不变
-                      polygon.set({
-                        left: (polygon.left || 0) + deltaX,
-                        top: (polygon.top || 0) + deltaY
-                      })
-                      polygon.setCoords()
-                    }
-                    
-                    polygon.setCoords()
-                    
-                    // 立即渲染，确保路径更新可见
-                    canvas.renderAll()
-                    
-                    return true
-                  },
-                  actionName: 'modifyPolygon',
-                  pointIndex: index,
-                  render: (ctx: CanvasRenderingContext2D, left: number, top: number, styleOverride: any, fabricObject: fabric.Object) => {
-                    ctx.save()
-                    ctx.fillStyle = categoryColor
-                    ctx.strokeStyle = '#fff'
-                    ctx.lineWidth = 2
-                    ctx.beginPath()
-                    ctx.arc(left, top, 5, 0, 2 * Math.PI)
-                    ctx.fill()
-                    ctx.stroke()
-                    ctx.restore()
-                  },
-                  cursorStyle: 'move',
-                })
-                
-                // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
-                control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
-                  const poly = fabricObject as fabric.Polygon
-                  const point = poly.points[index]
-                  if (!point) return { x: 0, y: 0 }
-                  const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-                  const pointLocalX = point.x - pathOffset.x
-                  const pointLocalY = point.y - pathOffset.y
-                  const cvs = (fabricObject as any).canvas
-                  const vpt = cvs?.viewportTransform
-                  const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
-                  const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
-                    ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
-                    : objMatrix
-                  return fabric.util.transformPoint(
-                    { x: pointLocalX, y: pointLocalY },
-                    screenMatrix
-                  )
-                }
-                
-                polygon.controls[controlName] = control
+            const selIsSeg = (projectRef.current || project)?.annotation_type === 'segmentation'
+            const selBaseOpts = {
+              canvas,
+              categoryColor: selCategoryColor,
+              isSegmentation: selIsSeg,
+              enableEdgeControls: true,
+              selectedVertexIndexRef,
+              onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+            }
+            createPolygonControls(polygon, {
+              ...selBaseOpts,
+              onRebuildControls: (poly) => createPolygonControls(poly, selBaseOpts),
             })
-            
-            
-            // 强制刷新canvas以显示控制点
             canvas.renderAll()
           }
           canvas.renderAll()
@@ -2679,6 +2556,7 @@ export default function Annotation() {
         setTimeout(() => {
           hasActivePolygonRef.current = false
           hasActiveAnnotationRef.current = false
+          selectedVertexIndexRef.current = null
           // 取消选中时，如果有最后一次鼠标事件，重新显示十字辅助线
           if (lastMouseEventRef.current && updateCrosshairNativeRef.current) {
             updateCrosshairNativeRef.current(lastMouseEventRef.current)
@@ -2739,166 +2617,21 @@ export default function Annotation() {
             })
             ;(polygon as any)._baseStrokeWidth = polyBase
             
-            polygon.controls = {}
-            
-            // 清除所有现有控制点并重新创建顶点控制点
-            polygon.controls = {}
-            const points = polygon.points || []
-            const categoryColor = (polygon as any).categoryId 
+            const updCategoryColor = (polygon as any).categoryId 
               ? categoriesRef.current.find(c => c.id === (polygon as any).categoryId)?.color || '#FF0000'
               : '#FF0000'
-            
-            // 为每个顶点创建控制点
-            points.forEach((point: any, index: number) => {
-              const controlName = `point${index}`
-              // 创建顶点控制点
-              const control = new fabric.Control({
-                  x: 0.5,
-                  y: 0.5,
-                  actionHandler: (eventData: any, transformData: any, x: number, y: number) => {
-                    // x, y 是 canvas 坐标（控制点的新位置）
-                    // 先检查并裁剪到图片边界内
-                    const bgImage = canvas.backgroundImage as fabric.Image
-                    if (bgImage && bgImage.width && bgImage.height) {
-                      const imageLeft = bgImage.left || 0
-                      const imageTop = bgImage.top || 0
-                      const imageWidth = bgImage.width * (bgImage.scaleX || 1)
-                      const imageHeight = bgImage.height * (bgImage.scaleY || 1)
-                      const imageRight = imageLeft + imageWidth
-                      const imageBottom = imageTop + imageHeight
-                      
-                      // 裁剪到图片边界内
-                      x = Math.max(imageLeft, Math.min(imageRight, x))
-                      y = Math.max(imageTop, Math.min(imageBottom, y))
-                    }
-                    
-                    const transformMatrix = polygon.calcTransformMatrix()
-                    const invertedMatrix = fabric.util.invertTransform(transformMatrix)
-                    const localPoint = fabric.util.transformPoint(
-                      { x, y } as any,
-                      invertedMatrix
-                    )
-                    
-                    // 获取 pathOffset
-                    const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    
-                    // localPoint 现在是相对于对象中心的坐标
-                    // 需要转换为相对于左上角的坐标
-                    const pointX = localPoint.x + pathOffset.x
-                    const pointY = localPoint.y + pathOffset.y
-                    
-                    // 选择一个锚点（选择第一个不是当前被拖动顶点的顶点）
-                    const polygonPointsArray = polygon.points || []
-                    let anchorIndex = 0
-                    if (index === 0 && polygonPointsArray.length > 1) {
-                      anchorIndex = 1
-                    }
-                    const anchorPoint = polygonPointsArray[anchorIndex]
-                    
-                    if (!anchorPoint) {
-                      return true
-                    }
-                    
-                    // 计算锚点的绝对位置（在更新之前）
-                    const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    const anchorLocalX = anchorPoint.x - oldPathOffset.x
-                    const anchorLocalY = anchorPoint.y - oldPathOffset.y
-                    const oldTransformMatrix = polygon.calcTransformMatrix()
-                    const anchorAbsolute = fabric.util.transformPoint(
-                      { x: anchorLocalX, y: anchorLocalY },
-                      oldTransformMatrix
-                    )
-                    
-                    // 更新被拖动的顶点位置
-                    if (polygonPointsArray[index]) {
-                      polygonPointsArray[index].x = pointX
-                      polygonPointsArray[index].y = pointY
-                    }
-                    
-                    // 更新多边形并强制刷新路径
-                    polygon.set({ points: polygonPointsArray })
-                    
-                    // 重新计算边界框和 pathOffset
-                    polygon._setPositionDimensions({})
-                    
-                    // 强制标记为需要重新渲染
-                    ;(polygon as any).dirty = true
-                    // 清除路径缓存，强制重新计算路径
-                    if ((polygon as any)._setPath) {
-                      delete (polygon as any)._setPath
-                    }
-                    
-                    // 获取新的 pathOffset
-                    const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
-                    
-                    // 计算锚点的新相对位置（相对于新的 pathOffset）
-                    const newAnchorLocalX = anchorPoint.x - newPathOffset.x
-                    const newAnchorLocalY = anchorPoint.y - newPathOffset.y
-                    
-                    // 计算新的变换矩阵（使用当前的 left/top）
-                    const newTransformMatrix = polygon.calcTransformMatrix()
-                    const newAnchorAbsolute = fabric.util.transformPoint(
-                      { x: newAnchorLocalX, y: newAnchorLocalY },
-                      newTransformMatrix
-                    )
-                    
-                    // 计算需要调整的偏移量
-                    const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
-                    const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
-                    
-                    if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
-                      // 调整 left/top 以保持锚点的绝对位置不变
-                      polygon.set({
-                        left: (polygon.left || 0) + deltaX,
-                        top: (polygon.top || 0) + deltaY
-                      })
-                      polygon.setCoords()
-                    }
-                    
-                    polygon.setCoords()
-                    
-                    // 立即渲染，确保路径更新可见
-                    canvas.renderAll()
-                    
-                    return true
-                  },
-                  actionName: 'modifyPolygon',
-                  pointIndex: index,
-                  render: (ctx: CanvasRenderingContext2D, left: number, top: number, styleOverride: any, fabricObject: fabric.Object) => {
-                    ctx.save()
-                    ctx.fillStyle = categoryColor
-                    ctx.strokeStyle = '#fff'
-                    ctx.lineWidth = 2
-                    ctx.beginPath()
-                    ctx.arc(left, top, 5, 0, 2 * Math.PI)
-                    ctx.fill()
-                    ctx.stroke()
-                    ctx.restore()
-                  },
-                  cursorStyle: 'move',
-                })
-                
-                // 控制点需随画布缩放：用 viewport×对象矩阵 得到屏幕坐标。不用 finalMatrix（其内部抵消了缩放）。
-                control.positionHandler = function(dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
-                  const poly = fabricObject as fabric.Polygon
-                  const point = poly.points[index]
-                  if (!point) return { x: 0, y: 0 }
-                  const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
-                  const pointLocalX = point.x - pathOffset.x
-                  const pointLocalY = point.y - pathOffset.y
-                  const cvs = (fabricObject as any).canvas
-                  const vpt = cvs?.viewportTransform
-                  const objMatrix = (fabricObject as fabric.Polygon).calcTransformMatrix()
-                  const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
-                    ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
-                    : objMatrix
-                  return fabric.util.transformPoint(
-                    { x: pointLocalX, y: pointLocalY },
-                    screenMatrix
-                  )
-                }
-                
-                polygon.controls[controlName] = control
+            const updIsSeg = (projectRef.current || project)?.annotation_type === 'segmentation'
+            const updBaseOpts = {
+              canvas,
+              categoryColor: updCategoryColor,
+              isSegmentation: updIsSeg,
+              enableEdgeControls: true,
+              selectedVertexIndexRef,
+              onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+            }
+            createPolygonControls(polygon, {
+              ...updBaseOpts,
+              onRebuildControls: (poly) => createPolygonControls(poly, updBaseOpts),
             })
             
             
@@ -4204,6 +3937,127 @@ export default function Annotation() {
             return
           }
           
+          // 多边形选中时：检测是否点击在边上（添加顶点）或顶点上（Delete 删除）
+          if (activeObjectAtStart?.type === 'polygon') {
+            const polygon = activeObjectAtStart as fabric.Polygon
+            const pointer = canvas.getPointer(e.e)
+            const points = polygon.points || []
+            const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+            const transformMatrix = polygon.calcTransformMatrix()
+            const zoom = canvas.getZoom() || 1
+            const VERTEX_HIT_RADIUS = 12 / zoom
+            const EDGE_HIT_RADIUS = 14 / zoom
+            const VERTEX_CLOSE_THRESHOLD = 10 / zoom
+            
+            // 先检查边（添加顶点）：边中点可点击，但距顶点过近时优先视为顶点
+            // getPointer 返回逻辑 canvas 坐标，与 transformMatrix 同一坐标系
+            // 缩放时命中半径 /zoom，使屏幕上的可点击区域保持约 12-14 像素
+            let hitEdge: number | null = null
+            let hitVertex: number | null = null
+            if (points.length >= 3) {
+              for (let i = 0; i < points.length; i++) {
+                const nextI = (i + 1) % points.length
+                const p1 = points[i]
+                const p2 = points[nextI]
+                const local1 = { x: p1.x - pathOffset.x, y: p1.y - pathOffset.y }
+                const local2 = { x: p2.x - pathOffset.x, y: p2.y - pathOffset.y }
+                const canvas1 = fabric.util.transformPoint(local1, transformMatrix)
+                const canvas2 = fabric.util.transformPoint(local2, transformMatrix)
+                const distToP1 = Math.sqrt((pointer.x - canvas1.x) ** 2 + (pointer.y - canvas1.y) ** 2)
+                const distToP2 = Math.sqrt((pointer.x - canvas2.x) ** 2 + (pointer.y - canvas2.y) ** 2)
+                if (distToP1 < VERTEX_CLOSE_THRESHOLD || distToP2 < VERTEX_CLOSE_THRESHOLD) continue
+                const segDx = canvas2.x - canvas1.x
+                const segDy = canvas2.y - canvas1.y
+                const lenSq = segDx * segDx + segDy * segDy
+                const t = lenSq <= 0 ? 0 : Math.max(0, Math.min(1,
+                  ((pointer.x - canvas1.x) * segDx + (pointer.y - canvas1.y) * segDy) / lenSq))
+                const closestX = canvas1.x + t * segDx
+                const closestY = canvas1.y + t * segDy
+                const dist = Math.sqrt((pointer.x - closestX) ** 2 + (pointer.y - closestY) ** 2)
+                if (dist < EDGE_HIT_RADIUS) {
+                  hitEdge = i
+                  break
+                }
+              }
+            }
+            if (hitEdge === null) {
+              for (let i = 0; i < points.length; i++) {
+                const p = points[i]
+                const localX = p.x - pathOffset.x
+                const localY = p.y - pathOffset.y
+                const canvasPt = fabric.util.transformPoint({ x: localX, y: localY }, transformMatrix)
+                const dx = pointer.x - canvasPt.x
+                const dy = pointer.y - canvasPt.y
+                if (Math.sqrt(dx * dx + dy * dy) <= VERTEX_HIT_RADIUS) {
+                  hitVertex = i
+                  break
+                }
+              }
+            }
+            selectedVertexIndexRef.current = hitVertex
+            canvas.renderAll()  // 刷新以显示顶点选中样式
+            
+            if (hitEdge !== null) {
+                const anchorPoint = points[hitEdge]
+                const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+                const anchorLocalX = anchorPoint.x - oldPathOffset.x
+                const anchorLocalY = anchorPoint.y - oldPathOffset.y
+                const anchorAbsolute = fabric.util.transformPoint(
+                  { x: anchorLocalX, y: anchorLocalY },
+                  transformMatrix
+                )
+                const invMatrix = fabric.util.invertTransform(transformMatrix)
+                const localPoint = fabric.util.transformPoint(pointer, invMatrix)
+                const newX = localPoint.x + pathOffset.x
+                const newY = localPoint.y + pathOffset.y
+                const polygonPointsArray = [...(polygon.points || [])]
+                polygonPointsArray.splice(hitEdge + 1, 0, { x: newX, y: newY })
+                polygon.set({ points: polygonPointsArray })
+                polygon._setPositionDimensions({})
+                ;(polygon as any).dirty = true
+                if ((polygon as any)._setPath) delete (polygon as any)._setPath
+                const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+                const newAnchorLocalX = anchorPoint.x - newPathOffset.x
+                const newAnchorLocalY = anchorPoint.y - newPathOffset.y
+                const newTransformMatrix = polygon.calcTransformMatrix()
+                const newAnchorAbsolute = fabric.util.transformPoint(
+                  { x: newAnchorLocalX, y: newAnchorLocalY },
+                  newTransformMatrix
+                )
+                const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
+                const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
+                if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
+                  polygon.set({
+                    left: (polygon.left || 0) + deltaX,
+                    top: (polygon.top || 0) + deltaY
+                  })
+                }
+                polygon.setCoords()
+                const edgeCategoryColor = (polygon as any).categoryId
+                  ? categoriesRef.current.find(c => c.id === (polygon as any).categoryId)?.color || '#FF0000'
+                  : '#FF0000'
+                const edgeIsSeg = (projectRef.current || project)?.annotation_type === 'segmentation'
+                const edgeBaseOpts = {
+                  canvas,
+                  categoryColor: edgeCategoryColor,
+                  isSegmentation: edgeIsSeg,
+                  enableEdgeControls: true,
+                  selectedVertexIndexRef,
+                  onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+                }
+                selectedVertexIndexRef.current = null  // 添加顶点后清除顶点选中
+                createPolygonControls(polygon, {
+                  ...edgeBaseOpts,
+                  onRebuildControls: (poly) => createPolygonControls(poly, edgeBaseOpts),
+                })
+                canvas.renderAll()
+                saveCurrentAnnotationsRef.current?.().catch(() => {})
+                return
+            }
+          } else {
+            selectedVertexIndexRef.current = null
+          }
+          
           // 如果正在绘制矩形，第二次点击完成画框
           if (isDrawingRef.current && startPointRef.current && rectRef.current) {
             console.log('第二次点击，完成矩形绘制')
@@ -5021,6 +4875,122 @@ export default function Annotation() {
           return
         }
         
+        // 多边形选中时：检测是否点击在边上（添加顶点）或顶点上（Delete 删除）
+        if (activeObjectAtStart?.type === 'polygon') {
+          const polygon = activeObjectAtStart as fabric.Polygon
+          const pointer = canvas.getPointer(e.e)
+          const points = polygon.points || []
+          const pathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+          const transformMatrix = polygon.calcTransformMatrix()
+          const zoom = canvas.getZoom() || 1
+          const VERTEX_HIT_RADIUS = 12 / zoom
+          const EDGE_HIT_RADIUS = 14 / zoom
+          const VERTEX_CLOSE_THRESHOLD = 10 / zoom
+          let hitEdge: number | null = null
+          let hitVertex: number | null = null
+          if (points.length >= 3) {
+            for (let i = 0; i < points.length; i++) {
+              const nextI = (i + 1) % points.length
+              const p1 = points[i]
+              const p2 = points[nextI]
+              const local1 = { x: p1.x - pathOffset.x, y: p1.y - pathOffset.y }
+              const local2 = { x: p2.x - pathOffset.x, y: p2.y - pathOffset.y }
+              const canvas1 = fabric.util.transformPoint(local1, transformMatrix)
+              const canvas2 = fabric.util.transformPoint(local2, transformMatrix)
+              const distToP1 = Math.sqrt((pointer.x - canvas1.x) ** 2 + (pointer.y - canvas1.y) ** 2)
+              const distToP2 = Math.sqrt((pointer.x - canvas2.x) ** 2 + (pointer.y - canvas2.y) ** 2)
+              if (distToP1 < VERTEX_CLOSE_THRESHOLD || distToP2 < VERTEX_CLOSE_THRESHOLD) continue
+              const segDx = canvas2.x - canvas1.x
+              const segDy = canvas2.y - canvas1.y
+              const lenSq = segDx * segDx + segDy * segDy
+              const t = lenSq <= 0 ? 0 : Math.max(0, Math.min(1,
+                ((pointer.x - canvas1.x) * segDx + (pointer.y - canvas1.y) * segDy) / lenSq))
+              const closestX = canvas1.x + t * segDx
+              const closestY = canvas1.y + t * segDy
+              const dist = Math.sqrt((pointer.x - closestX) ** 2 + (pointer.y - closestY) ** 2)
+              if (dist < EDGE_HIT_RADIUS) {
+                hitEdge = i
+                break
+              }
+            }
+          }
+          if (hitEdge === null) {
+            for (let i = 0; i < points.length; i++) {
+              const p = points[i]
+              const localX = p.x - pathOffset.x
+              const localY = p.y - pathOffset.y
+              const canvasPt = fabric.util.transformPoint({ x: localX, y: localY }, transformMatrix)
+              const dx = pointer.x - canvasPt.x
+              const dy = pointer.y - canvasPt.y
+              if (Math.sqrt(dx * dx + dy * dy) <= VERTEX_HIT_RADIUS) {
+                hitVertex = i
+                break
+              }
+            }
+          }
+          selectedVertexIndexRef.current = hitVertex
+          canvas.renderAll()
+          if (hitEdge !== null) {
+            const anchorPoint = points[hitEdge]
+            const oldPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+            const anchorLocalX = anchorPoint.x - oldPathOffset.x
+            const anchorLocalY = anchorPoint.y - oldPathOffset.y
+            const anchorAbsolute = fabric.util.transformPoint(
+              { x: anchorLocalX, y: anchorLocalY },
+              transformMatrix
+            )
+            const invMatrix = fabric.util.invertTransform(transformMatrix)
+            const localPoint = fabric.util.transformPoint(pointer, invMatrix)
+            const newX = localPoint.x + pathOffset.x
+            const newY = localPoint.y + pathOffset.y
+            const polygonPointsArray = [...(polygon.points || [])]
+            polygonPointsArray.splice(hitEdge + 1, 0, { x: newX, y: newY })
+            polygon.set({ points: polygonPointsArray })
+            polygon._setPositionDimensions({})
+            ;(polygon as any).dirty = true
+            if ((polygon as any)._setPath) delete (polygon as any)._setPath
+            const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+            const newAnchorLocalX = anchorPoint.x - newPathOffset.x
+            const newAnchorLocalY = anchorPoint.y - newPathOffset.y
+            const newTransformMatrix = polygon.calcTransformMatrix()
+            const newAnchorAbsolute = fabric.util.transformPoint(
+              { x: newAnchorLocalX, y: newAnchorLocalY },
+              newTransformMatrix
+            )
+            const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
+            const deltaY = anchorAbsolute.y - newAnchorAbsolute.y
+            if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
+              polygon.set({
+                left: (polygon.left || 0) + deltaX,
+                top: (polygon.top || 0) + deltaY
+              })
+            }
+            polygon.setCoords()
+            const edgeCategoryColor = (polygon as any).categoryId
+              ? categoriesRef.current.find(c => c.id === (polygon as any).categoryId)?.color || '#FF0000'
+              : '#FF0000'
+            const edgeIsSeg = (projectRef.current || project)?.annotation_type === 'segmentation'
+            const edgeBaseOpts = {
+              canvas,
+              categoryColor: edgeCategoryColor,
+              isSegmentation: edgeIsSeg,
+              enableEdgeControls: true,
+              selectedVertexIndexRef,
+              onModified: () => saveCurrentAnnotationsRef.current?.().catch(() => {}),
+            }
+            selectedVertexIndexRef.current = null
+            createPolygonControls(polygon, {
+              ...edgeBaseOpts,
+              onRebuildControls: (poly) => createPolygonControls(poly, edgeBaseOpts),
+            })
+            canvas.renderAll()
+            saveCurrentAnnotationsRef.current?.().catch(() => {})
+            return
+          }
+        } else {
+          selectedVertexIndexRef.current = null
+        }
+        
         // 如果正在绘制矩形，第二次点击完成画框
         if (isDrawingRef.current && startPointRef.current && rectRef.current) {
           console.log('第二次点击，完成矩形绘制')
@@ -5386,7 +5356,7 @@ export default function Annotation() {
         canvas.off('mouse:dblclick', handleDoubleClick)
       }
     }
-  }, [selectedCategory, categories, project, getLineImageBoundaryIntersection]) // 移除saveCurrentAnnotations依赖，使用ref
+  }, [selectedCategory, categories, project, getLineImageBoundaryIntersection, createPolygonControls])
 
 
   // 将YOLO格式转换为canvas坐标
