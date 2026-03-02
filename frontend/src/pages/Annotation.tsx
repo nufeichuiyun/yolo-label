@@ -4465,6 +4465,13 @@ export default function Annotation() {
         }
         
         canvas.on('mouse:down', handleMouseDown)
+        // 同时注册双击完成多边形，确保切图后不依赖 useEffect([selectedCategory,...]) 重跑
+        canvas.off('mouse:dblclick')
+        canvas.on('mouse:dblclick', () => {
+          if (isDrawingPolygonRef.current && polygonPointsRef.current.length >= 3) {
+            finishPolygonDrawing()
+          }
+        })
         // 确保选择功能默认启用
         canvas.selection = true
         console.log('Canvas创建时绑定mouse:down监听器完成')
@@ -4816,6 +4823,21 @@ export default function Annotation() {
     
     // 清理函数
     return () => {
+      // 移除原生事件监听器（与添加时完全对称），防止每次切图累积监听器副本
+      // 若不清理，旧的 handleNativeMouseMove 闭包中的 disposed canvas 会在 getPointer()
+      // 时返回异常坐标，导致 isPanningRef 被错误置为 true，进而阻断所有标注点击
+      if (canvasRef.current) {
+        canvasRef.current.removeEventListener('contextmenu', preventContextMenu, true)
+        canvasRef.current.removeEventListener('mousedown', handleNativeMouseDown, true)
+        canvasRef.current.removeEventListener('mousemove', handleNativeMouseMove, true)
+        canvasRef.current.removeEventListener('mouseup', handleNativeMouseUp, true)
+      }
+      if (canvasContainer) {
+        canvasContainer.removeEventListener('contextmenu', preventContextMenu, true)
+        canvasContainer.removeEventListener('mousedown', handleNativeMouseDown, true)
+        canvasContainer.removeEventListener('mousemove', handleNativeMouseMove, true)
+        canvasContainer.removeEventListener('mouseup', handleNativeMouseUp, true)
+      }
       // 只在imageId变化时清理，避免不必要的清理
       const cleanupImageId = imageIdRef.current
       if (fabricCanvasRef.current && image && image.id === Number(cleanupImageId)) {
@@ -4845,8 +4867,9 @@ export default function Annotation() {
     if (fabricCanvasRef.current) {
       const canvas = fabricCanvasRef.current
       
-      // 移除所有mouse:down监听器
+      // 移除所有mouse:down和mouse:dblclick监听器（包括bindMouseDownHandler注册的版本）
       canvas.off('mouse:down')
+      canvas.off('mouse:dblclick')
       
       // 统一的事件处理器：处理选择和绘制
       const handleMouseDown = (e: fabric.IEvent<MouseEvent>) => {
