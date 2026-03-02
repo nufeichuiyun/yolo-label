@@ -1811,9 +1811,19 @@ export default function Annotation() {
       
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault()
+        // 实例分割绘制多边形时禁止切换图片，否则图片外区域不会触发裁剪
+        if (isDrawingPolygonRef.current) {
+          message.warning('请先完成或取消当前多边形绘制（Enter/双击完成，Esc取消）')
+          return
+        }
         navigateToImage('prev')
       } else if (e.key === 'd' || e.key === 'D') {
         e.preventDefault()
+        // 实例分割绘制多边形时禁止切换图片，否则图片外区域不会触发裁剪
+        if (isDrawingPolygonRef.current) {
+          message.warning('请先完成或取消当前多边形绘制（Enter/双击完成，Esc取消）')
+          return
+        }
         navigateToImage('next')
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
@@ -5602,6 +5612,11 @@ export default function Annotation() {
                   if (!isCurrent) {
                     // 如果正在导航，忽略点击
                     if (navigatingRef.current) {
+                      return
+                    }
+                    // 实例分割绘制多边形时禁止切换图片，否则图片外区域不会触发裁剪
+                    if (isDrawingPolygonRef.current) {
+                      message.warning('请先完成或取消当前多边形绘制（Enter/双击完成，Esc取消）')
                       return
                     }
                     
