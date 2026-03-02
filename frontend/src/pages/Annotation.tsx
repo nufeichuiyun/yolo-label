@@ -4816,47 +4816,48 @@ export default function Annotation() {
       }, {
         crossOrigin: 'anonymous' // 允许跨域
       })
+
+      // 清理函数必须定义在 try 块内部，因为 canvasContainer / preventContextMenu 等变量
+      // 均以 const/let 声明于 try 块作用域，cleanup 定义在 try 块外部时无法访问它们
+      return () => {
+        // 移除原生事件监听器（与添加时完全对称），防止每次切图累积监听器副本
+        // 若不清理，旧的 handleNativeMouseMove 闭包中的 disposed canvas 会在 getPointer()
+        // 时返回异常坐标，导致 isPanningRef 被错误置为 true，进而阻断所有标注点击
+        if (canvasRef.current) {
+          canvasRef.current.removeEventListener('contextmenu', preventContextMenu, true)
+          canvasRef.current.removeEventListener('mousedown', handleNativeMouseDown, true)
+          canvasRef.current.removeEventListener('mousemove', handleNativeMouseMove, true)
+          canvasRef.current.removeEventListener('mouseup', handleNativeMouseUp, true)
+        }
+        if (canvasContainer) {
+          canvasContainer.removeEventListener('contextmenu', preventContextMenu, true)
+          canvasContainer.removeEventListener('mousedown', handleNativeMouseDown, true)
+          canvasContainer.removeEventListener('mousemove', handleNativeMouseMove, true)
+          canvasContainer.removeEventListener('mouseup', handleNativeMouseUp, true)
+        }
+        // 只在imageId变化时清理，避免不必要的清理
+        const cleanupImageId = imageIdRef.current
+        if (fabricCanvasRef.current && image && image.id === Number(cleanupImageId)) {
+          // 只有在当前图片的canvas才清理
+          try {
+            // 清除背景图片
+            if (fabricCanvasRef.current.backgroundImage) {
+              fabricCanvasRef.current.setBackgroundImage(null, () => {})
+            }
+            fabricCanvasRef.current.dispose()
+          } catch (err) {
+            console.error('清理canvas时出错:', err)
+          }
+          fabricCanvasRef.current = null
+        }
+        // 清理十字线ref
+        crosshairHLineRef.current = null
+        crosshairVLineRef.current = null
+        updateCrosshairNativeRef.current = null
+      }
     } catch (error) {
       console.error('创建canvas时出错:', error)
       message.error('创建画布失败，请刷新页面重试')
-    }
-    
-    // 清理函数
-    return () => {
-      // 移除原生事件监听器（与添加时完全对称），防止每次切图累积监听器副本
-      // 若不清理，旧的 handleNativeMouseMove 闭包中的 disposed canvas 会在 getPointer()
-      // 时返回异常坐标，导致 isPanningRef 被错误置为 true，进而阻断所有标注点击
-      if (canvasRef.current) {
-        canvasRef.current.removeEventListener('contextmenu', preventContextMenu, true)
-        canvasRef.current.removeEventListener('mousedown', handleNativeMouseDown, true)
-        canvasRef.current.removeEventListener('mousemove', handleNativeMouseMove, true)
-        canvasRef.current.removeEventListener('mouseup', handleNativeMouseUp, true)
-      }
-      if (canvasContainer) {
-        canvasContainer.removeEventListener('contextmenu', preventContextMenu, true)
-        canvasContainer.removeEventListener('mousedown', handleNativeMouseDown, true)
-        canvasContainer.removeEventListener('mousemove', handleNativeMouseMove, true)
-        canvasContainer.removeEventListener('mouseup', handleNativeMouseUp, true)
-      }
-      // 只在imageId变化时清理，避免不必要的清理
-      const cleanupImageId = imageIdRef.current
-      if (fabricCanvasRef.current && image && image.id === Number(cleanupImageId)) {
-        // 只有在当前图片的canvas才清理
-        try {
-          // 清除背景图片
-          if (fabricCanvasRef.current.backgroundImage) {
-            fabricCanvasRef.current.setBackgroundImage(null, () => {})
-          }
-          fabricCanvasRef.current.dispose()
-        } catch (error) {
-          console.error('清理canvas时出错:', error)
-        }
-        fabricCanvasRef.current = null
-      }
-      // 清理十字线ref
-      crosshairHLineRef.current = null
-      crosshairVLineRef.current = null
-      updateCrosshairNativeRef.current = null
     }
   }, [image, drawExistingAnnotations]) // 只依赖image和drawExistingAnnotations，不依赖selectedCategory和categories，避免切换类别时重新创建canvas
 
