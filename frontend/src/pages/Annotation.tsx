@@ -5410,6 +5410,11 @@ export default function Annotation() {
 
   const progressInfo = getProgressInfo()
 
+  // 计算当前图片在列表中的位置（用于进度区域显示）
+  const currentImageIndex = allImages.findIndex(img => img.id === Number(imageId))
+  const currentPosition = currentImageIndex >= 0 ? currentImageIndex + 1 : 0
+  const totalImages = allImages.length
+
   // 计算每个类别在当前图片中的数量
   const updateCategoryCounts = useCallback(() => {
     if (!fabricCanvasRef.current || !project) return
@@ -5517,9 +5522,12 @@ export default function Annotation() {
           {/* 显示标注进度 */}
           <span style={{ marginLeft: 16, color: '#fff', fontSize: '14px' }}>
             {progressInfo.isTaskProgress && currentTask ? (
-              <>工作包进度 ({currentTask.name}): {progressInfo.annotated}/{progressInfo.total} ({progressInfo.percentage}%)</>
+              <>工作包进度 ({currentTask.name}): 已标注 {progressInfo.annotated} 张 / 共 {progressInfo.total} 张 ({progressInfo.percentage}%)</>
             ) : (
-              <>进度: {progressInfo.annotated}/{progressInfo.total} ({progressInfo.percentage}%)</>
+              <>进度: 已标注 {progressInfo.annotated} 张 / 共 {progressInfo.total} 张 ({progressInfo.percentage}%)</>
+            )}
+            {currentPosition > 0 && totalImages > 0 && (
+              <>  ·  当前第 {currentPosition} 张 / 共 {totalImages} 张</>
             )}
           </span>
           <span style={{ marginLeft: 8, color: '#999', fontSize: '12px' }}>
