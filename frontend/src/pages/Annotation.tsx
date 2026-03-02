@@ -3707,7 +3707,8 @@ export default function Annotation() {
           }
           
           // 创建新的临时线段（从最后一个顶点到鼠标位置）
-          const categoryColor = categories.find(c => c.id === selectedCategory)?.color || '#FF0000'
+          // 使用 selectedCategoryRef 获取最新类别，避免切换类别时闭包仍使用旧值
+          const categoryColor = categories.find(c => c.id === selectedCategoryRef.current)?.color || '#FF0000'
           const line = new fabric.Line([lastPoint.x, lastPoint.y, pointer.x, pointer.y], {
             stroke: categoryColor,
             strokeWidth: 1,
