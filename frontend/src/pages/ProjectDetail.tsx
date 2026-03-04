@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider, Tooltip } from 'antd'
+import { Layout, Card, Button, Table, Upload, message, Space, Statistic, Row, Col, Input, Modal, Popconfirm, Tag, ColorPicker, Checkbox, Progress, List, Spin, Select, Slider, Tooltip, Dropdown } from 'antd'
 import { UploadOutlined, ArrowLeftOutlined, DownloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined, CloseOutlined, HistoryOutlined, CheckOutlined, ThunderboltOutlined, StopOutlined, DownOutlined } from '@ant-design/icons'
 import { projectsApi, Project } from '../api/projects'
 import { imagesApi, Image } from '../api/images'
@@ -695,19 +695,39 @@ export default function ProjectDetail() {
     }
   }
 
-  const handleExport = async () => {
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  }
+
+  const handleExportYOLO = async () => {
+    const hide = message.loading('正在导出 YOLO 格式...', 0)
     try {
       const { blob, filename } = await exportApi.exportYOLO(Number(projectId))
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      downloadBlob(blob, filename)
+      hide()
       message.success('导出成功')
     } catch (error: any) {
+      hide()
+      message.error(error.response?.data?.detail || '导出失败')
+    }
+  }
+
+  const handleExportFull = async () => {
+    const hide = message.loading('正在导出完整项目...', 0)
+    try {
+      const { blob, filename } = await exportApi.exportFull(Number(projectId))
+      downloadBlob(blob, filename)
+      hide()
+      message.success('导出成功')
+    } catch (error: any) {
+      hide()
       message.error(error.response?.data?.detail || '导出失败')
     }
   }
@@ -1176,9 +1196,18 @@ export default function ProjectDetail() {
                 </Button>
               </Upload>
               {images.length > 0 && (
-                <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>
-                  导出yolo格式数据集
-                </Button>
+                <Dropdown
+                  menu={{
+                    items: [
+                      { key: 'yolo', label: '导出 YOLO 格式（仅已标注）', onClick: handleExportYOLO },
+                      { key: 'full', label: '导出完整项目（可导入）', onClick: handleExportFull },
+                    ],
+                  }}
+                >
+                  <Button type="primary" icon={<DownloadOutlined />}>
+                    导出 <DownOutlined />
+                  </Button>
+                </Dropdown>
               )}
             </Space>
           }
