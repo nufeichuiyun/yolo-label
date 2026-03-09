@@ -166,6 +166,7 @@ cd yolo-label-offline-*
 - **端口被占用**：部署时脚本会检测并推荐可用端口
 - **GPU 不可用**：确认 `nvidia-smi` 正常，已安装 NVIDIA Container Toolkit
 - **预标注无结果**：确认 Celery 使用 solo pool，查看 `docker logs yolo-label-celery-worker`
+- **训练卡在 Epoch 0 / 下载模型失败**：Docker 容器内可能无法访问外网。在宿主机执行 `./scripts/download_yolo_models.sh` 预下载模型，脚本会自动复制到容器；训练时会优先使用本地模型。
 
 ---
 
