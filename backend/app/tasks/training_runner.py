@@ -27,7 +27,16 @@ def run_training(
     try:
         from ultralytics import YOLO
 
-        model = YOLO(base_model)
+        # 若 base_model 为文件名（非绝对路径）且 MODEL_DIR 中已存在，优先使用本地文件，避免无网络时下载失败
+        model_path = base_model
+        if not os.path.isabs(base_model):
+            model_dir = os.getenv("MODEL_DIR", "./models")
+            local_path = os.path.join(model_dir, base_model)
+            if os.path.isfile(local_path):
+                model_path = os.path.abspath(local_path)
+                print(f"[training] 使用本地模型: {model_path}", flush=True)
+
+        model = YOLO(model_path)
 
         # 进度回调：通过 Redis 和 DB 更新，供主进程/前端读取
         def _update_progress(current_epoch: int, progress_pct: int):
@@ -130,6 +139,7 @@ def run_training(
             exist_ok=True,
             verbose=True,
             device=device,
+            amp=False,  # 禁用 AMP 检查，避免无网络时下载 yolo26n.pt 失败导致训练卡住
         )
         return 0
     except Exception as e:
