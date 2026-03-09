@@ -720,7 +720,7 @@ services:
     volumes:
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
-      - models_data:/app/models
+      - ./models:/app/models
       - training_output_data:/app/training_output
     ports:
       - "${BACKEND_PORT}:8000"
@@ -752,7 +752,7 @@ ${gpu_env_section}
     volumes:
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
-      - models_data:/app/models
+      - ./models:/app/models
       - training_output_data:/app/training_output
     depends_on:
       db:
@@ -779,7 +779,6 @@ volumes:
   postgres_data:
   uploads_data:
   annotations_data:
-  models_data:
   training_output_data:
 COMPOSEFILE
 

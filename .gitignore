@@ -1,6 +1,13 @@
 # Python
 __pycache__/
 *.pt
+# 项目根目录 models/ 下的 .pt 文件纳入版本控制（预训练模型）
+!models/*.pt
+# X 尺寸模型超过 100MB，不纳入版本控制，需用户自行下载
+models/yolo11x.pt
+models/yolo11x-seg.pt
+# 训练输出模型不纳入版本控制
+models/trained_*.pt
 *.py[cod]
 *$py.class
 *.so
