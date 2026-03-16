@@ -128,7 +128,7 @@ def train_model_task(
             batch_resolved = _resolve_batch(batch, has_gpu)
             print(f"[training] 使用子进程隔离训练，device={device}, workers={workers}, batch={batch_resolved}", flush=True)
 
-            # 通过子进程运行训练，子进程退出时所有内存被 OS  reclaim
+            # 通过子进程运行训练，子进程退出时所有内存被 OS  reclaim；捕获输出以便失败时展示具体错误
             proc = subprocess.run(
                 [
                     sys.executable,
@@ -155,10 +155,20 @@ def train_model_task(
                 ],
                 env={**os.environ},
                 cwd=os.getcwd(),
+                capture_output=True,
+                text=True,
             )
 
             if proc.returncode != 0:
-                raise RuntimeError(f"训练子进程退出码: {proc.returncode}")
+                err_detail = f"训练子进程退出码: {proc.returncode}"
+                if proc.stderr and proc.stderr.strip():
+                    err_detail += "\n\n子进程错误输出:\n" + proc.stderr.strip()
+                if proc.stdout and proc.stdout.strip():
+                    # 取最后几行 stdout 作为补充（常有 traceback 在 stdout）
+                    lines = proc.stdout.strip().split("\n")
+                    tail = "\n".join(lines[-30:]) if len(lines) > 30 else proc.stdout.strip()
+                    err_detail += "\n\n子进程标准输出(最后):\n" + tail
+                raise RuntimeError(err_detail)
 
             # 3. 复制输出模型到 models 目录
             task.progress = 98
