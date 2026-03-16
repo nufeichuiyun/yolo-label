@@ -3308,13 +3308,23 @@ export default function Annotation() {
         return false
       }
       
+      // 循环切换类别（用于未绘制时的右键单击）
+      const cycleToNextCategory = () => {
+        const cats = categoriesRef.current || []
+        if (cats.length === 0) return
+        const currentId = selectedCategoryRef.current
+        const idx = cats.findIndex(c => c.id === currentId)
+        const nextIdx = idx < 0 ? 0 : (idx + 1) % cats.length
+        setSelectedCategory(cats[nextIdx].id)
+      }
+      
       // 直接在原生DOM事件上处理右键拖动
       const handleNativeMouseDown = (e: MouseEvent) => {
         // 检查是否是右键
         if (e.button === 2) {
           const pointer = canvas.getPointer(e)
           
-          // 如果正在绘制多边形，记录右键按下的位置和时间，用于区分单击和拖动
+          // 如果正在绘制多边形，记录右键按下的位置和时间，用于区分单击和拖动（删除最后一个顶点）
           if (isDrawingPolygonRef.current && polygonPointsRef.current.length > 0) {
             rightMouseDownPointRef.current = {
               x: pointer.x,
@@ -3327,11 +3337,19 @@ export default function Annotation() {
             return
           }
           
+          // 未在画框或画多边形时：记录右键按下的位置和时间，用于区分单击（循环类别）和拖动（平移）
+          if (!isDrawingRef.current) {
+            rightMouseDownPointRef.current = {
+              x: pointer.x,
+              y: pointer.y,
+              time: Date.now()
+            }
+          }
+          
           // 检查图片是否完全在画布内显示
           // 如果图片完全在画布内，不允许拖动（避免图片移出视野）
           const fullyVisible = isImageFullyVisible()
           if (fullyVisible) {
-            console.log('图片完全在画布内，不允许右键拖动')
             // 仍然阻止默认行为（防止上下文菜单）
             e.preventDefault()
             e.stopPropagation()
@@ -3546,15 +3564,17 @@ export default function Annotation() {
       updateCrosshairNativeRef.current = updateCrosshairNative
       
       const handleNativeMouseMove = (e: MouseEvent) => {
-        // 如果正在绘制多边形且右键按下，检查是否移动（用于区分单击和拖动）
-        if (isDrawingPolygonRef.current && e.buttons === 2 && rightMouseDownPointRef.current) {
+        // 如果右键按下，检查是否移动（用于区分单击和拖动）
+        if (e.buttons === 2 && rightMouseDownPointRef.current) {
           const pointer = canvas.getPointer(e)
           const dx = pointer.x - rightMouseDownPointRef.current.x
           const dy = pointer.y - rightMouseDownPointRef.current.y
           const distance = Math.sqrt(dx * dx + dy * dy)
           
-          // 如果移动距离超过阈值，认为是拖动，清除右键按下记录（不删除点）
+          // 如果移动距离超过阈值，认为是拖动
           if (distance > RIGHT_CLICK_THRESHOLD) {
+            // 多边形绘制时：清除记录，不删除点
+            // 未绘制时：清除记录，mouseup 时不循环类别
             rightMouseDownPointRef.current = null
           }
         }
@@ -3621,6 +3641,32 @@ export default function Annotation() {
             }
             
             // 否则清除记录
+            rightMouseDownPointRef.current = null
+          }
+          
+          // 未在画框或画多边形时：检查是否是右键单击（循环切换类别）
+          if (!isDrawingPolygonRef.current && !isDrawingRef.current && rightMouseDownPointRef.current) {
+            const pointer = canvas.getPointer(e)
+            const dx = pointer.x - rightMouseDownPointRef.current.x
+            const dy = pointer.y - rightMouseDownPointRef.current.y
+            const distance = Math.sqrt(dx * dx + dy * dy)
+            const timeElapsed = Date.now() - rightMouseDownPointRef.current.time
+            
+            if (distance <= RIGHT_CLICK_THRESHOLD && timeElapsed <= RIGHT_CLICK_TIME_THRESHOLD) {
+              cycleToNextCategory()
+              // 若曾进入平移模式（图片未完全可见时），需结束平移
+              if (isPanningRef.current) {
+                isPanningRef.current = false
+                lastPanPointRef.current = null
+                canvas.defaultCursor = 'default'
+                canvas.hoverCursor = 'move'
+                canvas.selection = true
+              }
+              e.preventDefault()
+              e.stopPropagation()
+              rightMouseDownPointRef.current = null
+              return
+            }
             rightMouseDownPointRef.current = null
           }
           
@@ -5571,9 +5617,9 @@ export default function Annotation() {
             )}
           </span>
           <span style={{ marginLeft: 8, color: '#999', fontSize: '12px' }}>
-            A键上一张 | D键下一张 | 自动保存 | 滚轮缩放 | 右键拖动平移
+            A键上一张 | D键下一张 | 自动保存 | 滚轮缩放 | 右键拖动平移 | 右键单击循环切换类别
             {project?.annotation_type === 'detection' && ' | 单击开始画框 | 再次单击完成 | Esc取消'}
-            {project?.annotation_type === 'segmentation' && ' | 点击绘制多边形 | 双击/Enter完成 | Esc完成(≥3点)或取消 | 右键单击删除最后一点'}
+            {project?.annotation_type === 'segmentation' && ' | 点击绘制多边形 | 双击/Enter完成 | Esc完成(≥3点)或取消 | 画多边形时右键删除最后一点'}
           </span>
         </Space>
       </Header>
