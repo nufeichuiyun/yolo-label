@@ -10,6 +10,7 @@ import { annotationsApi } from '../api/annotations'
 import { statsApi, ProjectStats, TaskStats } from '../api/stats'
 import { projectsApi, Project } from '../api/projects'
 import { tasksApi, Task } from '../api/tasks'
+import { useAuth } from '../contexts/AuthContext'
 import './Annotation.css'
 
 // 动态获取API地址
@@ -33,6 +34,7 @@ const getApiBaseUrl = () => {
 export default function Annotation() {
   const { projectId, imageId } = useParams<{ projectId: string; imageId: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null)
   const [image, setImage] = useState<Image | null>(null)
@@ -5548,7 +5550,11 @@ export default function Annotation() {
             crosshairHLineRef.current = null
             crosshairVLineRef.current = null
             updateCrosshairNativeRef.current = null
-            navigate(`/projects/${projectId}`)
+            if (user?.role === 'annotator') {
+              navigate('/tasks')
+            } else {
+              navigate(`/projects/${projectId}`)
+            }
           }}>
             返回
           </Button>
