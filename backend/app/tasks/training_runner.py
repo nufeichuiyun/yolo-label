@@ -140,6 +140,7 @@ def run_training(
             verbose=True,
             device=device,
             amp=False,  # 禁用 AMP 检查，避免无网络时下载 yolo26n.pt 失败导致训练卡住
+            patience=50,  # 连续 50 个 epoch 验证指标无提升则提前结束
         )
         return 0
     except Exception as e:
