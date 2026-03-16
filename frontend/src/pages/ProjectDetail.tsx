@@ -311,7 +311,7 @@ export default function ProjectDetail() {
       const task = await trainingApi.create({
         project_id: Number(projectId),
         base_model: trainingConfig.base_model,
-        epochs: trainingConfig.epochs,
+        epochs: trainingConfig.epochs || 100,
         imgsz: trainingConfig.imgsz,
         batch: trainingConfig.batch,
         train_split: trainingConfig.train_split,
@@ -1298,8 +1298,17 @@ export default function ProjectDetail() {
                 type="number"
                 min={1}
                 max={1000}
-                value={trainingConfig.epochs}
-                onChange={(e) => setTrainingConfig(prev => ({ ...prev, epochs: Number(e.target.value) || 100 }))}
+                placeholder="100"
+                value={trainingConfig.epochs === 0 ? '' : trainingConfig.epochs}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '') {
+                    setTrainingConfig(prev => ({ ...prev, epochs: 0 }))
+                    return
+                  }
+                  const n = Number(raw)
+                  if (!Number.isNaN(n)) setTrainingConfig(prev => ({ ...prev, epochs: n }))
+                }}
               />
             </div>
             <div>
