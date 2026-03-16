@@ -1196,13 +1196,11 @@ export default function Annotation() {
       polygonLineRef.current = null
     }
     
-    // 移除最后一个顶点标记
-    if (polygonPointMarkersRef.current.length > 0) {
-      const lastMarker = polygonPointMarkersRef.current.pop()
-      if (lastMarker) {
-        canvas.remove(lastMarker)
-      }
-    }
+    // 移除所有旧的顶点标记，然后根据剩余点重新创建（确保被删除的顶点立即消失）
+    polygonPointMarkersRef.current.forEach(marker => {
+      canvas.remove(marker)
+    })
+    polygonPointMarkersRef.current = []
     
     // 更新预览（直接调用函数逻辑，避免依赖）
     if (polygonPointsRef.current.length >= 2) {
