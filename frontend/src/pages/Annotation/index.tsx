@@ -902,24 +902,23 @@ export default function Annotation() {
         return
       }
 
-      // 计算可用空间：减去 header(64) + footer(104) + padding(48) + sider 留白
-      const headerHeight = 64
-      const footerHeight = 104
-      const verticalPadding = 48  // annotation-content padding * 2
-      const availableHeight = window.innerHeight - headerHeight - footerHeight - verticalPadding
-      const siderWidth = 200
-      const horizontalPadding = 48
-      const availableWidth = window.innerWidth - siderWidth - horizontalPadding
+      // 计算可用空间（精确扣除所有 UI 元素和 padding）
+      // 垂直：header(64) + footer(~108 含 padding+border) + content padding(24*2) + canvas-container padding(20*2)
+      // 水平：sider(200) + content padding(24*2) + canvas-container padding(20*2)
+      const chromeTotalV = 64 + 108 + 24 * 2 + 20 * 2
+      const chromeTotalH = 200 + 24 * 2 + 20 * 2
 
-      const maxWidth = Math.max(availableWidth, 400)
-      const maxHeight = Math.max(availableHeight, 300)
-      // 不限制 scale <= 1，让小图片也能填满画布
-      const scale = Math.min(maxWidth / img.width, maxHeight / img.height)
+      // canvas margin（图片周围留白，用于点击图像外区域）
+      const margin = 30
 
-      const marginX = Math.max(30, img.width * scale * 0.03)
-      const marginY = Math.max(30, img.height * scale * 0.03)
-      const canvasWidth = img.width * scale + 2 * marginX
-      const canvasHeight = img.height * scale + 2 * marginY
+      // 图片可用的最大尺寸 = 视口 - 所有 chrome - canvas margin
+      const maxImgWidth = Math.max(window.innerWidth - chromeTotalH - margin * 2, 200)
+      const maxImgHeight = Math.max(window.innerHeight - chromeTotalV - margin * 2, 200)
+
+      const scale = Math.min(maxImgWidth / img.width, maxImgHeight / img.height)
+
+      const canvasWidth = img.width * scale + 2 * margin
+      const canvasHeight = img.height * scale + 2 * margin
 
       canvas.setDimensions({ width: canvasWidth, height: canvasHeight })
 
@@ -934,7 +933,6 @@ export default function Annotation() {
 
       canvas.setBackgroundImage(img, () => {
         canvas.renderAll()
-        // 设置 imageBounds 供 useAnnotations 使用
         const bgImage = canvas.backgroundImage as fabric.Image
         if (bgImage) {
           imageLoader.imageBoundsRef.current = {
@@ -947,8 +945,8 @@ export default function Annotation() {
           }
         }
       }, {
-        left: marginX,
-        top: marginY,
+        left: margin,
+        top: margin,
         scaleX: scale,
         scaleY: scale,
         crossOrigin: 'anonymous',
