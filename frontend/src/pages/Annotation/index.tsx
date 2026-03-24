@@ -14,7 +14,6 @@ import { useAuth } from '../../contexts/AuthContext'
 import './Annotation.css'
 
 // Hooks
-import { useCanvas } from './hooks/useCanvas'
 import { useZoomPan } from './hooks/useZoomPan'
 import { useImageLoader } from './hooks/useImageLoader'
 import { useAnnotations } from './hooks/useAnnotations'
@@ -81,16 +80,10 @@ export default function Annotation() {
   useEffect(() => { projectRef.current = project }, [project])
 
   // ============================================================
-  // Canvas hook
+  // Canvas ref (canvas is created in the image-display useEffect below)
   // ============================================================
   const canvasElRef = useRef<HTMLCanvasElement>(null)
-  const { canvas, setCanvasSize } = useCanvas({ canvasRef: canvasElRef })
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null)
-
-  // Sync canvas ref
-  useEffect(() => {
-    fabricCanvasRef.current = canvas
-  }, [canvas])
 
   // ============================================================
   // Drawing hook (needs to be created before selection for refs)
@@ -446,55 +439,68 @@ export default function Annotation() {
   useEffect(() => {
     if (!imageId || !projectId) return
 
-    const oldImageId = imageIdRef.current
-    const oldImage = imageRef.current
     const targetImageId = imageId
 
-    imageIdRef.current = imageId
-
     const handleImageChange = async () => {
-      if (imageIdRef.current !== targetImageId) return
-
       // Save old image annotations if switching
-      if (fabricCanvasRef.current && oldImage && oldImageId && oldImageId !== targetImageId) {
+      const oldCanvas = fabricCanvasRef.current
+      const oldImage = imageRef.current
+      const oldImageId = imageIdRef.current
+      if (oldCanvas && oldImage && oldImageId && oldImageId !== targetImageId) {
         try {
-          const tempImageIdRef = imageIdRef.current
-          const tempImageRef = imageRef.current
-          imageIdRef.current = oldImageId
-          imageRef.current = oldImage
-          await annotationsMgr.saveCurrentAnnotations()
-          imageIdRef.current = tempImageIdRef
-          imageRef.current = tempImageRef
-          if (imageIdRef.current !== targetImageId) return
+          await saveCurrentAnnotationsRef.current?.()
         } catch (error) {
           console.error('保存旧图片标注失败:', error)
         }
       }
 
-      if (imageIdRef.current !== targetImageId) return
+      // Update ref to new imageId
+      imageIdRef.current = targetImageId
 
       // Reset state
       setImage(null)
       setAnnotations([])
       annotationsMgr.annotationsRef.current = []
 
-      if (imageIdRef.current !== targetImageId) return
-
       // Load new image data
-      loadImage().catch(error => {
+      try {
+        const data = await imagesApi.get(Number(targetImageId))
+        if (imageIdRef.current !== targetImageId) return // stale
+        setImage(data)
+      } catch (error) {
         console.error('加载图片失败:', error)
         message.error('加载图片失败')
-      })
-      loadAnnotations().catch(error => {
-        console.error('加载标注失败:', error)
-      })
-      loadCurrentTask().catch(error => {
-        console.error('加载任务包失败:', error)
-      })
+      }
+
+      try {
+        const data = await annotationsApi.getImageAnnotations(Number(targetImageId))
+        if (imageIdRef.current !== targetImageId) return // stale
+        setAnnotations(data)
+        annotationsMgr.annotationsRef.current = data
+      } catch (error) {
+        setAnnotations([])
+        annotationsMgr.annotationsRef.current = []
+      }
+
+      try {
+        const task = await tasksApi.getImageTask(Number(targetImageId))
+        if (imageIdRef.current !== targetImageId) return // stale
+        setCurrentTask(task)
+        if (task) {
+          const taskStatsData = await statsApi.getTaskStats(task.id)
+          setTaskStats(taskStatsData)
+        } else {
+          setTaskStats(null)
+        }
+      } catch (error) {
+        setCurrentTask(null)
+        setTaskStats(null)
+      }
     }
 
     handleImageChange()
-  }, [imageId, projectId, loadImage, loadAnnotations, loadCurrentTask, annotationsMgr.saveCurrentAnnotations])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageId, projectId])
 
   // ============================================================
   // useEffect: Update preview images
@@ -578,6 +584,38 @@ export default function Annotation() {
 
     // --- Setup crosshair (from useDrawing) ---
     drawing.setupCrosshair(canvas)
+
+    // --- Mouse wheel zoom (inline, since useZoomPan can't track canvas lifecycle) ---
+    canvas.on('mouse:wheel', ((opt: fabric.IEvent<WheelEvent>) => {
+      const e = opt.e
+      e.preventDefault()
+      e.stopPropagation()
+
+      if (drawing.isDrawingRef.current || drawing.isDrawingPolygonRef.current) return
+
+      const delta = e.deltaY
+      let zoom = canvas.getZoom()
+
+      const bgImage = canvas.backgroundImage as fabric.Image
+      let minZoom = 0.1
+      if (bgImage && bgImage.width && bgImage.height) {
+        const imgW = bgImage.width * (bgImage.scaleX || 1)
+        const imgH = bgImage.height * (bgImage.scaleY || 1)
+        const canvasEffW = canvas.getWidth() * 0.9
+        const canvasEffH = canvas.getHeight() * 0.9
+        minZoom = Math.max(canvasEffW / imgW, canvasEffH / imgH, 0.1)
+      }
+
+      if (delta < 0) {
+        zoom = Math.min(zoom + 0.1, 5)
+      } else {
+        zoom = Math.max(zoom - 0.1, minZoom)
+      }
+
+      const pointer = canvas.getPointer(e)
+      canvas.zoomToPoint(new fabric.Point(pointer.x, pointer.y), zoom)
+      zoomPan.constrainImagePosition(canvas)
+    }) as any)
 
     // --- Fabric mouse events ---
 
@@ -1173,10 +1211,7 @@ export default function Annotation() {
             } catch (error) {
               console.error('保存标注失败:', error)
             }
-            if (fabricCanvasRef.current) {
-              fabricCanvasRef.current.dispose()
-              fabricCanvasRef.current = null
-            }
+            // 不手动 dispose canvas —— 组件卸载时 useEffect cleanup 会处理
             if (user?.role === 'annotator') {
               navigate('/tasks')
             } else {
