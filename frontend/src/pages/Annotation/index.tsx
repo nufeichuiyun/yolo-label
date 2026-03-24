@@ -153,13 +153,9 @@ export default function Annotation() {
   // ============================================================
   const imageLoader = useImageLoader({
     canvasRef: fabricCanvasRef,
-    setCanvasSize,
-    onImageLoaded: useCallback((_bounds, _origW, _origH, _scale) => {
-      // Image loaded callback - we use this to trigger annotation redraw
-    }, []),
-    onBeforeSwitch: useCallback(() => {
-      // Before image switch - save and reset
-    }, []),
+    setCanvasSize: useCallback(() => {}, []),  // canvas 尺寸在 useEffect 中直接管理
+    onImageLoaded: useCallback(() => {}, []),
+    onBeforeSwitch: useCallback(() => {}, []),
     getApiBaseUrl,
   })
 
@@ -928,6 +924,18 @@ export default function Annotation() {
 
       canvas.setBackgroundImage(img, () => {
         canvas.renderAll()
+        // 设置 imageBounds 供 useAnnotations 使用
+        const bgImage = canvas.backgroundImage as fabric.Image
+        if (bgImage) {
+          imageLoader.imageBoundsRef.current = {
+            left: bgImage.left || 0,
+            top: bgImage.top || 0,
+            scaleX: bgImage.scaleX || 1,
+            scaleY: bgImage.scaleY || 1,
+            originalWidth: bgImage.width || 0,
+            originalHeight: bgImage.height || 0,
+          }
+        }
       }, {
         left: marginX,
         top: marginY,
