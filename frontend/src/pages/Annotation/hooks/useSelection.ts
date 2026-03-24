@@ -618,6 +618,26 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       )
     })
 
+    // 检查是否有顶点在图像边界外（需要裁剪）
+    const imgRect = {
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.left + bounds.originalWidth * bounds.scaleX,
+      bottom: bounds.top + bounds.originalHeight * bounds.scaleY,
+    }
+    const hasOutOfBounds = canvasPoints.some(p =>
+      p.x < imgRect.left - 0.5 || p.x > imgRect.right + 0.5 ||
+      p.y < imgRect.top - 0.5 || p.y > imgRect.bottom + 0.5
+    )
+
+    if (!hasOutOfBounds) {
+      // 所有点都在边界内，直接保存，不做裁剪重建
+      saveCurrentAnnotationsRef.current?.().catch(error => {
+        console.error('多边形修改后保存失败:', error)
+      })
+      return
+    }
+
     const clippedCanvasPoints = clipPolygonToImageBounds(canvasPoints, bounds)
 
     if (clippedCanvasPoints.length < 3) {
@@ -628,13 +648,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       return
     }
 
-    const pointsChanged = clippedCanvasPoints.length !== canvasPoints.length ||
-      clippedCanvasPoints.some((clipped, i) => {
-        if (i >= canvasPoints.length) return true
-        const dx = Math.abs(clipped.x - canvasPoints[i].x)
-        const dy = Math.abs(clipped.y - canvasPoints[i].y)
-        return dx > 0.1 || dy > 0.1
-      })
+    const pointsChanged = true // 已确认有越界点，裁剪后一定有变化
 
     if (pointsChanged) {
       const invertedMatrix = fabric.util.invertTransform(transformMatrix)
