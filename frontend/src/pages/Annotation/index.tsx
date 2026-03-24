@@ -902,12 +902,22 @@ export default function Annotation() {
         return
       }
 
-      const maxWidth = Math.min(window.innerWidth - 100, 1600)
-      const maxHeight = Math.min(window.innerHeight - 200, 1000)
-      const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1)
+      // 计算可用空间：减去 header(64) + footer(104) + padding(48) + sider 留白
+      const headerHeight = 64
+      const footerHeight = 104
+      const verticalPadding = 48  // annotation-content padding * 2
+      const availableHeight = window.innerHeight - headerHeight - footerHeight - verticalPadding
+      const siderWidth = 200
+      const horizontalPadding = 48
+      const availableWidth = window.innerWidth - siderWidth - horizontalPadding
 
-      const marginX = Math.max(50, img.width * scale * 0.05)
-      const marginY = Math.max(50, img.height * scale * 0.05)
+      const maxWidth = Math.max(availableWidth, 400)
+      const maxHeight = Math.max(availableHeight, 300)
+      // 不限制 scale <= 1，让小图片也能填满画布
+      const scale = Math.min(maxWidth / img.width, maxHeight / img.height)
+
+      const marginX = Math.max(30, img.width * scale * 0.03)
+      const marginY = Math.max(30, img.height * scale * 0.03)
       const canvasWidth = img.width * scale + 2 * marginX
       const canvasHeight = img.height * scale + 2 * marginY
 

@@ -38,60 +38,69 @@ export function clipRectToImageBounds(rect: RectBounds, bounds: ImageBounds): Re
 
 export function clipPolygonToImageBounds(points: Point[], bounds: ImageBounds): Point[] {
   const img = getImageRect(bounds)
-  type Edge = 'top' | 'bottom' | 'left' | 'right'
 
-  const clipEdge = (pts: Point[], edge: Edge): Point[] => {
+  // 标准 Sutherland-Hodgman 算法：逐边裁剪
+  // 每条边只判断该边方向的 inside/outside，不做正交方向的范围限制
+  // （正交方向由后续的边裁剪处理）
+  const clipEdge = (pts: Point[], isInside: (p: Point) => boolean, intersect: (p1: Point, p2: Point) => Point): Point[] => {
+    if (pts.length === 0) return []
     const result: Point[] = []
     for (let i = 0; i < pts.length; i++) {
       const p1 = pts[i]
       const p2 = pts[(i + 1) % pts.length]
-      let p1Inside = false
-      let p2Inside = false
+      const p1In = isInside(p1)
+      const p2In = isInside(p2)
 
-      if (edge === 'top')    { p1Inside = p1.y >= img.top;    p2Inside = p2.y >= img.top }
-      if (edge === 'bottom') { p1Inside = p1.y <= img.bottom; p2Inside = p2.y <= img.bottom }
-      if (edge === 'left')   { p1Inside = p1.x >= img.left;   p2Inside = p2.x >= img.left }
-      if (edge === 'right')  { p1Inside = p1.x <= img.right;  p2Inside = p2.x <= img.right }
-
-      let intersection: Point | null = null
-
-      if (edge === 'top' && ((p1.y < img.top && p2.y >= img.top) || (p1.y >= img.top && p2.y < img.top))) {
-        const t = (img.top - p1.y) / (p2.y - p1.y)
-        if (t > 0 && t <= 1) {
-          const x = p1.x + t * (p2.x - p1.x)
-          if (x >= img.left && x <= img.right) intersection = { x, y: img.top }
-        }
-      } else if (edge === 'bottom' && ((p1.y < img.bottom && p2.y >= img.bottom) || (p1.y >= img.bottom && p2.y < img.bottom))) {
-        const t = (img.bottom - p1.y) / (p2.y - p1.y)
-        if (t > 0 && t <= 1) {
-          const x = p1.x + t * (p2.x - p1.x)
-          if (x >= img.left && x <= img.right) intersection = { x, y: img.bottom }
-        }
-      } else if (edge === 'left' && ((p1.x < img.left && p2.x >= img.left) || (p1.x >= img.left && p2.x < img.left))) {
-        const t = (img.left - p1.x) / (p2.x - p1.x)
-        if (t > 0 && t <= 1) {
-          const y = p1.y + t * (p2.y - p1.y)
-          if (y >= img.top && y <= img.bottom) intersection = { x: img.left, y }
-        }
-      } else if (edge === 'right' && ((p1.x < img.right && p2.x >= img.right) || (p1.x >= img.right && p2.x < img.right))) {
-        const t = (img.right - p1.x) / (p2.x - p1.x)
-        if (t > 0 && t <= 1) {
-          const y = p1.y + t * (p2.y - p1.y)
-          if (y >= img.top && y <= img.bottom) intersection = { x: img.right, y }
-        }
+      if (p1In && p2In) {
+        // 两点都在内侧，保留 p2
+        result.push(p2)
+      } else if (p1In && !p2In) {
+        // p1 在内，p2 在外，添加交点
+        result.push(intersect(p1, p2))
+      } else if (!p1In && p2In) {
+        // p1 在外，p2 在内，添加交点和 p2
+        result.push(intersect(p1, p2))
+        result.push(p2)
       }
-
-      if (p1Inside) result.push(p1)
-      if (intersection) result.push(intersection)
+      // 两点都在外侧：不添加任何点
     }
     return result
   }
 
   let clipped = [...points]
-  clipped = clipEdge(clipped, 'top')
-  clipped = clipEdge(clipped, 'bottom')
-  clipped = clipEdge(clipped, 'left')
-  clipped = clipEdge(clipped, 'right')
+
+  // 上边界
+  clipped = clipEdge(clipped,
+    p => p.y >= img.top,
+    (p1, p2) => {
+      const t = (img.top - p1.y) / (p2.y - p1.y)
+      return { x: p1.x + t * (p2.x - p1.x), y: img.top }
+    }
+  )
+  // 下边界
+  clipped = clipEdge(clipped,
+    p => p.y <= img.bottom,
+    (p1, p2) => {
+      const t = (img.bottom - p1.y) / (p2.y - p1.y)
+      return { x: p1.x + t * (p2.x - p1.x), y: img.bottom }
+    }
+  )
+  // 左边界
+  clipped = clipEdge(clipped,
+    p => p.x >= img.left,
+    (p1, p2) => {
+      const t = (img.left - p1.x) / (p2.x - p1.x)
+      return { x: img.left, y: p1.y + t * (p2.y - p1.y) }
+    }
+  )
+  // 右边界
+  clipped = clipEdge(clipped,
+    p => p.x <= img.right,
+    (p1, p2) => {
+      const t = (img.right - p1.x) / (p2.x - p1.x)
+      return { x: img.right, y: p1.y + t * (p2.y - p1.y) }
+    }
+  )
 
   // 去重
   const cleaned: Point[] = []
