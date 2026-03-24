@@ -207,9 +207,7 @@ cd yolo-label-offline-*
 
 欢迎关注 **「怒飞垂云」** 公众号，获取最新动态、使用教程和技术分享：
 
-<p align="center">
-  <img src="pictures/公众号.jpg" width="200" alt="怒飞垂云公众号">
-</p>
+<img src="pictures/公众号.jpg" width="200" alt="怒飞垂云公众号">
 
 ---
 
