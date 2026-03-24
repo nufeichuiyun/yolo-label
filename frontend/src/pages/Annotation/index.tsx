@@ -922,13 +922,6 @@ export default function Annotation() {
 
       canvas.setDimensions({ width: canvasWidth, height: canvasHeight })
 
-      // Set DPR backstore
-      const currentDpr = window.devicePixelRatio || 1
-      canvas.setDimensions(
-        { width: canvasWidth * currentDpr, height: canvasHeight * currentDpr },
-        { backstoreOnly: true }
-      )
-
       canvas.getObjects().forEach((obj: fabric.Object) => canvas.remove(obj))
 
       canvas.setBackgroundImage(img, () => {
