@@ -1135,8 +1135,8 @@ export default function ProjectDetail() {
                           
                           return imagesApi.upload(Number(projectId), batch)
                             .then((response: any) => {
-                              const successCount = response?.success_count || response?.images?.length || batch.length
-                              const failCount = response?.failed_count || (batch.length - successCount)
+                              const successCount = response?.success_count ?? response?.images?.length ?? batch.length
+                              const failCount = response?.failed_count ?? (batch.length - successCount)
                               totalSuccess += successCount
                               totalFail += failCount
                               
@@ -1188,7 +1188,7 @@ export default function ProjectDetail() {
                   }
                 }}
                 showUploadList={false} // 不显示上传列表，避免混乱
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,.bmp"
                 multiple
               >
                 <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={uploading}>

@@ -50,17 +50,34 @@ async def upload_images(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="未提供文件"
             )
-        
+
+        # 预检查所有文件的扩展名
+        unsupported_files = []
+        for file in files:
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            if file_ext not in ALLOWED_EXTENSIONS:
+                unsupported_files.append(file.filename)
+        if unsupported_files:
+            supported = ", ".join(ALLOWED_EXTENSIONS)
+            examples = unsupported_files[:5]
+            detail = f"包含不支持的文件格式，仅支持 {supported}。不支持的文件：{'、'.join(examples)}"
+            if len(unsupported_files) > 5:
+                detail += f" 等共 {len(unsupported_files)} 个"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=detail
+            )
+
         # 检查项目权限并刷新项目信息
         project = check_project_permission(project_id, current_user, db)
         db.refresh(project)  # 确保获取最新的images_per_task值
-        
+
         # 创建项目目录
         project_dir = os.path.join(UPLOAD_DIR, "images", str(project_id))
         os.makedirs(project_dir, exist_ok=True)
-        
+
         uploaded_images = []
-        
+
         # 处理文件上传（支持大量文件，使用异步处理避免阻塞）
         for idx, file in enumerate(files):
             # 每处理100个文件，输出一次进度
@@ -71,11 +88,6 @@ async def upload_images(
                     db.commit()
                     for img in uploaded_images:
                         db.refresh(img)
-            
-            # 检查文件扩展名
-            file_ext = os.path.splitext(file.filename)[1].lower()
-            if file_ext not in ALLOWED_EXTENSIONS:
-                continue
             
             try:
                 # 清理文件名，移除可能导致问题的字符，但保留中文和基本特殊字符

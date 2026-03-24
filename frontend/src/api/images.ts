@@ -31,15 +31,16 @@ export const imagesApi = {
     return response.data
   },
   
-  upload: async (projectId: number, files: File[]): Promise<void> => {
+  upload: async (projectId: number, files: File[]) => {
     const formData = new FormData()
     files.forEach(f => formData.append('files', f))
-    await apiClient.post(`/api/images/upload/${projectId}`, formData, {
+    const response = await apiClient.post(`/api/images/upload/${projectId}`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
       timeout: 300000, // 5分钟超时（支持大量文件上传）
     })
+    return response.data
   },
   
   delete: async (id: number): Promise<void> => {
