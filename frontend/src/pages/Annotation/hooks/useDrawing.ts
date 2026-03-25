@@ -378,6 +378,8 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
     polygonPointMarkersRef.current = []
 
     // 为每个顶点创建标记
+    const zoom = canvas.getZoom()
+    const invZoom = 1 / zoom
     points.forEach(point => {
       const marker = new fabric.Circle({
         left: point.x,
@@ -386,6 +388,8 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
         fill: categoryColor,
         stroke: '#fff',
         strokeWidth: 1,
+        scaleX: invZoom,
+        scaleY: invZoom,
         selectable: false,
         evented: false,
         originX: 'center',
@@ -551,6 +555,8 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
     const categoryColor = getCategoryColor()
     const points = polygonPointsRef.current
 
+    const zoom = canvas.getZoom()
+    const invZoom = 1 / zoom
     if (points.length >= 2 && categoryColor) {
       const minX = Math.min(...points.map(p => p.x))
       const minY = Math.min(...points.map(p => p.y))
@@ -569,6 +575,7 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
         const marker = new fabric.Circle({
           left: point.x, top: point.y,
           radius: 4, fill: categoryColor, stroke: '#fff', strokeWidth: 1,
+          scaleX: invZoom, scaleY: invZoom,
           selectable: false, evented: false, originX: 'center', originY: 'center',
         })
         canvas.add(marker)
@@ -579,6 +586,7 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
       const marker = new fabric.Circle({
         left: point.x, top: point.y,
         radius: 4, fill: categoryColor, stroke: '#fff', strokeWidth: 1,
+        scaleX: invZoom, scaleY: invZoom,
         selectable: false, evented: false, originX: 'center', originY: 'center',
       })
       canvas.add(marker)
@@ -870,9 +878,11 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
       polygonPointsRef.current = [{ x: pointer.x, y: pointer.y }]
 
       const categoryColor = getCategoryColorById(currentSelectedCategory)
+      const invZoom = 1 / canvas.getZoom()
       const firstMarker = new fabric.Circle({
         left: pointer.x, top: pointer.y,
         radius: 4, fill: categoryColor, stroke: '#fff', strokeWidth: 1,
+        scaleX: invZoom, scaleY: invZoom,
         selectable: false, evented: false, originX: 'center', originY: 'center',
       })
       canvas.add(firstMarker)

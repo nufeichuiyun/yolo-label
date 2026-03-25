@@ -600,6 +600,14 @@ export default function Annotation() {
       const pointer = canvas.getPointer(e)
       canvas.zoomToPoint(new fabric.Point(pointer.x, pointer.y), zoom)
       zoomPan.constrainImagePosition(canvas)
+
+      // 缩放后更新多边形顶点标记大小，使其不随缩放变化
+      const invZoom = 1 / zoom
+      drawing.polygonPointMarkersRef.current.forEach(marker => {
+        marker.set({ scaleX: invZoom, scaleY: invZoom })
+        marker.setCoords()
+      })
+      canvas.renderAll()
     }) as any)
 
     // --- Fabric mouse events ---
