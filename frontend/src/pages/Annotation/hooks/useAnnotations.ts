@@ -5,7 +5,7 @@ import { annotationsApi } from '../../../api/annotations'
 import { Category } from '../../../api/categories'
 import { Image } from '../../../api/images'
 import { rectToYOLO, polygonToYOLO, getImageBounds, yoloToCanvas } from '../utils/coordinate'
-import { clampYOLO } from '../utils/clipping'
+import { clampYOLO, clipRectToImageBounds, clipPolygonToImageBounds } from '../utils/clipping'
 import { createAnnotationRect, createAnnotationPolygon } from '../utils/fabricObjects'
 import type { ImageBounds, YOLORect, YOLOPolygon } from '../types'
 
@@ -83,15 +83,31 @@ export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsRe
       if (!canvasRef.current || canvasRef.current !== canvas) return
       if (imageIdRef.current !== imageId) return
 
+      // 确保 canvas 当前显示的是目标图片，避免在图片切换过程中误保存
+      const canvasImageId = (canvas as any)._currentImageId
+      if (canvasImageId != null && canvasImageId !== image.id) return
+
       const bgImage = canvas.backgroundImage as fabric.Image
       if (!bgImage) return
       const bounds = getImageBounds(bgImage)
 
-      const annotationType = project?.annotation_type || 'detection'
+      // project 未加载时不保存，防止 annotationType 误判导致清空标注
+      if (!project) return
+
+      const annotationType = project.annotation_type || 'detection'
       const annotationTypes = annotationType === 'segmentation' ? ['polygon'] : ['rect']
       const objects = canvas.getObjects().filter(obj =>
         annotationTypes.includes(obj.type!) && (obj as any).categoryId != null
       )
+
+      // 安全阀：canvas 上有标注对象但类型不匹配时（例如有 polygon 但查找 rect），
+      // 说明 annotationType 可能错误，禁止保存以防清空已有标注
+      if (objects.length === 0) {
+        const allAnnotationObjects = canvas.getObjects().filter(obj =>
+          ['rect', 'polygon'].includes(obj.type!) && (obj as any).categoryId != null
+        )
+        if (allAnnotationObjects.length > 0) return // 有标注但类型不匹配，跳过
+      }
 
       const annotationData = objects
         .map((obj) => {
@@ -193,9 +209,25 @@ export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsRe
           if (!points || points.length < 3) return
 
           // YOLO → canvas 坐标
-          const canvasPoints = (points as number[][]).map(([x, y]) =>
+          let canvasPoints = (points as number[][]).map(([x, y]) =>
             yoloToCanvas({ x, y }, bounds)
           )
+
+          // 自动裁切超出图像边界的多边形
+          const imgRect = {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.left + bounds.originalWidth * bounds.scaleX,
+            bottom: bounds.top + bounds.originalHeight * bounds.scaleY,
+          }
+          const hasOutOfBounds = canvasPoints.some(p =>
+            p.x < imgRect.left - 0.5 || p.x > imgRect.right + 0.5 ||
+            p.y < imgRect.top - 0.5 || p.y > imgRect.bottom + 0.5
+          )
+          if (hasOutOfBounds) {
+            canvasPoints = clipPolygonToImageBounds(canvasPoints, bounds)
+            if (canvasPoints.length < 3) return
+          }
 
           const polygon = createAnnotationPolygon({
             points: canvasPoints,
@@ -239,11 +271,29 @@ export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsRe
             bounds
           )
 
+          // 自动裁切超出图像边界的矩形
+          let rectLeft = topLeft.x
+          let rectTop = topLeft.y
+          let rectWidth = bottomRight.x - topLeft.x
+          let rectHeight = bottomRight.y - topLeft.y
+          const clippedRect = clipRectToImageBounds(
+            { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight },
+            bounds
+          )
+          if (!clippedRect) return // 完全在图像外
+          if (clippedRect.left !== rectLeft || clippedRect.top !== rectTop ||
+              clippedRect.width !== rectWidth || clippedRect.height !== rectHeight) {
+            rectLeft = clippedRect.left
+            rectTop = clippedRect.top
+            rectWidth = clippedRect.width
+            rectHeight = clippedRect.height
+          }
+
           const rect = createAnnotationRect({
-            left: topLeft.x,
-            top: topLeft.y,
-            width: bottomRight.x - topLeft.x,
-            height: bottomRight.y - topLeft.y,
+            left: rectLeft,
+            top: rectTop,
+            width: rectWidth,
+            height: rectHeight,
             color,
             zoom,
             annotationId: ann.id,
@@ -258,6 +308,9 @@ export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsRe
     })
 
     canvas.renderAll()
+
+    // 自动裁切仅影响当前显示，不主动保存。
+    // 用户下次编辑标注时会通过 onModified 回调自然保存裁切后的结果。
   }, [createPolygonControls, selectedVertexIndexRef, saveCurrentAnnotationsRef])
 
   const addAnnotation = useCallback((fabricObject: fabric.Object) => {

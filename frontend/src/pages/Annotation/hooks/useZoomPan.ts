@@ -28,9 +28,8 @@ export function useZoomPan(options: UseZoomPanOptions): UseZoomPanReturn {
     const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0]
     const imgW = bgImage.width * (bgImage.scaleX || 1) * zoom
     const imgH = bgImage.height * (bgImage.scaleY || 1) * zoom
-    // bgImage.left 不乘 zoom（固定 margin）
-    const imgLeft = (bgImage.left || 0) + vpt[4]
-    const imgTop = (bgImage.top || 0) + vpt[5]
+    const imgLeft = (bgImage.left || 0) * zoom + vpt[4]
+    const imgTop = (bgImage.top || 0) * zoom + vpt[5]
     const canvasW = canvas.getWidth()
     const canvasH = canvas.getHeight()
 
@@ -58,24 +57,27 @@ export function useZoomPan(options: UseZoomPanOptions): UseZoomPanReturn {
     const bgImageLeft = bgImage.left || 0
     const bgImageTop = bgImage.top || 0
 
-    // 计算图片的实际位置（bgImage.left 不乘 zoom）
-    let imageLeft = bgImageLeft + vpt[4]
-    let imageTop = bgImageTop + vpt[5]
+    // 图片在屏幕上的实际左上角：bgImageLeft * zoom + vpt[4]
+    // （Fabric.js 中背景图的 left/top 会被 zoom 缩放）
+    let imageScreenLeft = bgImageLeft * zoom + vpt[4]
+    let imageScreenTop = bgImageTop * zoom + vpt[5]
 
     if (imageDisplayWidth <= canvasWidth) {
-      imageLeft = Math.max(0, Math.min(imageLeft, canvasWidth - imageDisplayWidth))
+      // 图片比画布小，不允许移出画布
+      imageScreenLeft = Math.max(0, Math.min(imageScreenLeft, canvasWidth - imageDisplayWidth))
     } else {
-      imageLeft = Math.min(0, Math.max(imageLeft, canvasWidth - imageDisplayWidth))
+      // 图片比画布大，确保画布区域始终被图片覆盖
+      imageScreenLeft = Math.min(0, Math.max(imageScreenLeft, canvasWidth - imageDisplayWidth))
     }
 
     if (imageDisplayHeight <= canvasHeight) {
-      imageTop = Math.max(0, Math.min(imageTop, canvasHeight - imageDisplayHeight))
+      imageScreenTop = Math.max(0, Math.min(imageScreenTop, canvasHeight - imageDisplayHeight))
     } else {
-      imageTop = Math.min(0, Math.max(imageTop, canvasHeight - imageDisplayHeight))
+      imageScreenTop = Math.min(0, Math.max(imageScreenTop, canvasHeight - imageDisplayHeight))
     }
 
-    vpt[4] = imageLeft - bgImageLeft
-    vpt[5] = imageTop - bgImageTop
+    vpt[4] = imageScreenLeft - bgImageLeft * zoom
+    vpt[5] = imageScreenTop - bgImageTop * zoom
     canvas.setViewportTransform(vpt)
   }, [])
 

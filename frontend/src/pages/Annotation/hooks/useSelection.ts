@@ -662,37 +662,24 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       ;(polygon as any).dirty = true
       if ((polygon as any)._setPath) delete (polygon as any)._setPath
 
+      // 补偿 pathOffset 变化导致的位置偏移
+      // 使用裁剪后的第一个点作为锚点：已知其正确的 canvas 坐标为 clippedCanvasPoints[0]
       const newPathOffset = (polygon as any).pathOffset || { x: 0, y: 0 }
+      const newTransformMatrix = polygon.calcTransformMatrix()
+      const anchorLocal = clippedLocalPoints[0]
+      const actualPos = fabric.util.transformPoint(
+        { x: anchorLocal.x - newPathOffset.x, y: anchorLocal.y - newPathOffset.y },
+        newTransformMatrix
+      )
+      const expectedPos = clippedCanvasPoints[0]
+      const adjustDeltaX = expectedPos.x - actualPos.x
+      const adjustDeltaY = expectedPos.y - actualPos.y
 
-      if (Math.abs(newPathOffset.x - pathOffset.x) > 0.001 ||
-          Math.abs(newPathOffset.y - pathOffset.y) > 0.001) {
-        // 保持多边形绝对位置不变
-        const firstPointOld = points[0]
-        const firstPointOldLocalX = firstPointOld.x - pathOffset.x
-        const firstPointOldLocalY = firstPointOld.y - pathOffset.y
-        const firstPointOldAbsolute = fabric.util.transformPoint(
-          { x: firstPointOldLocalX, y: firstPointOldLocalY },
-          transformMatrix
-        )
-
-        const firstPointNew = clippedLocalPoints[0]
-        const firstPointNewLocalX = firstPointNew.x - newPathOffset.x
-        const firstPointNewLocalY = firstPointNew.y - newPathOffset.y
-        const newTransformMatrix = polygon.calcTransformMatrix()
-        const firstPointNewAbsolute = fabric.util.transformPoint(
-          { x: firstPointNewLocalX, y: firstPointNewLocalY },
-          newTransformMatrix
-        )
-
-        const adjustDeltaX = firstPointOldAbsolute.x - firstPointNewAbsolute.x
-        const adjustDeltaY = firstPointOldAbsolute.y - firstPointNewAbsolute.y
-
-        if (Math.abs(adjustDeltaX) > 0.001 || Math.abs(adjustDeltaY) > 0.001) {
-          polygon.set({
-            left: (polygon.left || 0) + adjustDeltaX,
-            top: (polygon.top || 0) + adjustDeltaY,
-          })
-        }
+      if (Math.abs(adjustDeltaX) > 0.001 || Math.abs(adjustDeltaY) > 0.001) {
+        polygon.set({
+          left: (polygon.left || 0) + adjustDeltaX,
+          top: (polygon.top || 0) + adjustDeltaY,
+        })
       }
 
       polygon.setCoords()

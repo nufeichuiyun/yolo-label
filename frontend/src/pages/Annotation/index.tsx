@@ -59,6 +59,7 @@ export default function Annotation() {
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null)
   const [previewImages, setPreviewImages] = useState<Image[]>([])
   const [categoryCounts, setCategoryCounts] = useState<Record<number, number>>({})
+  const [bgImageReady, setBgImageReady] = useState(0) // increments when fabric bgImage is set
 
   // Refs for closure-safe access
   const categoriesRef = useRef<Category[]>([])
@@ -438,18 +439,6 @@ export default function Annotation() {
     const targetImageId = imageId
 
     const handleImageChange = async () => {
-      // Save old image annotations if switching
-      const oldCanvas = fabricCanvasRef.current
-      const oldImage = imageRef.current
-      const oldImageId = imageIdRef.current
-      if (oldCanvas && oldImage && oldImageId && oldImageId !== targetImageId) {
-        try {
-          await saveCurrentAnnotationsRef.current?.()
-        } catch (error) {
-          console.error('保存旧图片标注失败:', error)
-        }
-      }
-
       // Update ref to new imageId
       imageIdRef.current = targetImageId
 
@@ -937,6 +926,8 @@ export default function Annotation() {
             originalHeight: bgImage.height || 0,
           }
         }
+        // 通知 draw effect 背景图已就绪，触发标注重绘
+        setBgImageReady(prev => prev + 1)
       }, {
         left: margin,
         top: margin,
@@ -985,7 +976,7 @@ export default function Annotation() {
   // ============================================================
 
   useEffect(() => {
-    if (!fabricCanvasRef.current || !image) return
+    if (!fabricCanvasRef.current || !image || !project) return
 
     const currentImageId = imageIdRef.current
     if (image.id !== Number(currentImageId)) return
@@ -993,7 +984,7 @@ export default function Annotation() {
     const canvasImageId = (fabricCanvasRef.current as any)._currentImageId
     if (canvasImageId !== image.id) return
 
-    const annotationType = project?.annotation_type || 'detection'
+    const annotationType = project.annotation_type || 'detection'
 
     if (annotations.length === 0) {
       const canvas = fabricCanvasRef.current
@@ -1023,7 +1014,7 @@ export default function Annotation() {
     )
 
     setTimeout(() => { updateCategoryCountsRef.current?.() }, 50)
-  }, [annotations, categories, image, annotationsMgr.drawExistingAnnotations, project])
+  }, [annotations, categories, image, annotationsMgr.drawExistingAnnotations, project, bgImageReady])
 
   // ============================================================
   // useEffect: Canvas object change tracking for category counts
@@ -1069,14 +1060,19 @@ export default function Annotation() {
       if (now - lastKeyTime < DEBOUNCE_TIME) return
       lastKeyTime = now
 
-      if (e.key === 'a' || e.key === 'A') {
+      if (e.key === 'F1') {
+        e.preventDefault()
+        return
+      }
+
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
         e.preventDefault()
         if (drawing.isDrawingPolygonRef.current) {
           message.warning('请先完成或取消当前多边形绘制（Enter/双击完成，Esc取消）')
           return
         }
         navigateToImage('prev')
-      } else if (e.key === 'd' || e.key === 'D') {
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
         e.preventDefault()
         if (drawing.isDrawingPolygonRef.current) {
           message.warning('请先完成或取消当前多边形绘制（Enter/双击完成，Esc取消）')
