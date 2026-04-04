@@ -17,13 +17,13 @@ YOLO-Label is a web-based YOLO annotation and training platform. It supports obj
 - `backend/app/routers/` — 13 API route files under `/api/` prefix
 - `backend/app/services/` — YOLO inference, dataset preparation, training archive
 - `backend/app/tasks/` — Celery tasks for training and pre-annotation
-- `backend/app/models.py` — SQLAlchemy models (10 tables: users, projects, images, annotations, categories, models, tasks, etc.)
+- `backend/app/models.py` — SQLAlchemy models (users, projects, images, annotations, categories, models, tasks, etc.)
 - `backend/app/schemas.py` — Pydantic request/response schemas
 - `backend/app/database.py` — PostgreSQL connection config
 - `backend/alembic/` — Database migrations
 
 ### Key Frontend Structure
-- `frontend/src/pages/Annotation.tsx` — Core annotation editor (~5700 lines, Fabric.js canvas)
+- `frontend/src/pages/Annotation/` — Core annotation editor (Fabric.js canvas), split into index.tsx + utils/
 - `frontend/src/pages/` — Page components (Projects, ProjectDetail, Tasks, Models, Users, Login)
 - `frontend/src/api/` — Axios API client modules
 - `frontend/src/contexts/` — React context (Auth)
@@ -48,7 +48,15 @@ docker compose up
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 
 # Production deployment (interactive)
-bash manage.sh
+./manage.sh prod deploy
+
+# Other manage.sh commands
+./manage.sh test deploy       # Test environment with defaults + hot reload
+./manage.sh prod redeploy     # Redeploy with existing config
+./manage.sh prod restart      # Restart services
+./manage.sh status            # View service status
+./manage.sh logs [service]    # View logs
+./manage.sh offline package   # Package for offline deployment
 ```
 
 ### Frontend
@@ -57,6 +65,8 @@ cd frontend
 npm install
 npm run dev          # Vite dev server (port 3000, proxies /api and /uploads to :8000)
 npm run build        # tsc && vite build
+npm run test         # Run Vitest once
+npm run test:watch   # Run Vitest in watch mode
 ```
 
 ### Backend
@@ -73,9 +83,12 @@ alembic upgrade head
 alembic revision --autogenerate -m "description"
 ```
 
+## Testing
+
+Frontend has Vitest tests for annotation utility functions in `frontend/src/pages/Annotation/utils/__tests__/`. No backend tests exist. No linting or formatting configuration is set up.
+
 ## Conventions
 
 - **Git commits must be in Chinese.** Format: `动词 + 对象 + 说明` (e.g., `优化项目详情界面的布局`). Unrelated changes should be separate commits.
 - YOLO annotation format: detection `class_id x_center y_center width height` (normalized), segmentation polygon vertices (normalized).
 - Frontend uses Chinese locale (zhCN from Ant Design).
-- No automated test suite exists.
