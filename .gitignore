@@ -84,3 +84,6 @@ uploads/annotations/*
 # Backups
 backups/*
 !backups/.gitkeep
+
+# Claude Code 本地配置（包含每位开发者各自的权限白名单与本机路径，禁止提交）
+.claude/
