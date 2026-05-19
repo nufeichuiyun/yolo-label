@@ -1,5 +1,18 @@
 # 脚本说明
 
+## YOLO-Label 控制面板（Windows）
+
+`yolo-label.bat` + `yolo-label.ps1` 提供交互式菜单，封装 `docker compose` 常用操作：启动、停止、状态、日志、重启、重建镜像、初始化数据库。
+
+```cmd
+REM 在项目根目录或资源管理器中双击均可
+scripts\yolo-label.bat
+```
+
+完整说明（含环境要求、代理配置、常见问题）见 [`docs/WINDOWS.md`](../docs/WINDOWS.md)。
+
+Linux / macOS 用户请使用项目根目录的 `manage.sh`。
+
 ## YOLO11 模型批量下载
 
 用于预下载 YOLO11 官方预训练模型，解决 Docker 容器内无外网时的训练失败问题。模型保存到项目根目录的 `models/` 文件夹，Docker 部署时会自动挂载到容器的 `/app/models`。

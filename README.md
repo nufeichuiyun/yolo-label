@@ -49,6 +49,8 @@
 
 ## 快速开始
 
+### Linux / macOS
+
 ```bash
 git clone https://gitee.com/junzixing/yolo-label.git
 cd yolo-label
@@ -60,14 +62,26 @@ cd yolo-label
 ./manage.sh test deploy
 ```
 
+### Windows 11
+
+需要 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（启用 WSL2 后端）。GPU 用户额外需要 NVIDIA 显卡驱动（≥ 535，自带 WSL2 GPU 支持，**无需单独安装 CUDA Toolkit**）。详见 [`docs/WINDOWS.md`](docs/WINDOWS.md)。
+
+```cmd
+git clone https://gitee.com/junzixing/yolo-label.git
+cd yolo-label
+
+REM 双击 scripts\yolo-label.bat 即可打开控制面板（启动/停止/状态/日志/重建）
+scripts\yolo-label.bat
+```
+
 ### 系统要求
 
 | 项目 | 最低要求 |
 |------|---------|
-| 操作系统 | Ubuntu 22.04 / 24.04 或支持 Docker 的 Linux |
+| 操作系统 | Ubuntu 22.04 / 24.04 或支持 Docker 的 Linux ；或 **Windows 11 + Docker Desktop (WSL2)** |
 | 内存 | 2 GB（训练建议 8 GB+）|
 | 磁盘 | 4 GB（首次构建约 17 GB）|
-| GPU（可选）| NVIDIA 显卡 + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)，加速训练与预标注 |
+| GPU（可选）| NVIDIA 显卡。Linux 需安装 [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)；Windows 仅需新版 NVIDIA 驱动 + Docker Desktop 启用 GPU 支持 |
 
 ### 常用命令
 
