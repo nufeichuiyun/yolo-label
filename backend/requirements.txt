@@ -15,9 +15,10 @@ celery==5.3.4
 email-validator==2.1.0
 
 # YOLO11和PyTorch依赖
-# PyTorch with CUDA 12.1 support
-torch>=2.1.0
-torchvision>=0.16.0
+# Pin torch to 2.5.1 to avoid torch._dynamo duplicate dispatch bug in 2.6+
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1
+torchvision==0.20.1
 # YOLO11 (ultralytics)
 ultralytics>=8.3.0
 # OpenCV for image processing
