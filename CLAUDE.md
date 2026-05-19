@@ -89,6 +89,6 @@ Frontend has Vitest tests for annotation utility functions in `frontend/src/page
 
 ## Conventions
 
-- **Git commits must be in Chinese.** Format: `动词 + 对象 + 说明` (e.g., `优化项目详情界面的布局`). Unrelated changes should be separate commits.
+- **Git commits must be in Chinese.** Format: `动词 + 对象 + 说明` (e.g., `优化项目详情界面的布局`). Keep messages concise and focus on the *purpose* of the change rather than enumerating each modified file or line. Unrelated changes should be separate commits.
 - YOLO annotation format: detection `class_id x_center y_center width height` (normalized), segmentation polygon vertices (normalized).
 - Frontend uses Chinese locale (zhCN from Ant Design).
