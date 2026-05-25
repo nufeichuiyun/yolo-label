@@ -15,10 +15,12 @@ celery==5.3.4
 email-validator==2.1.0
 
 # YOLO11和PyTorch依赖
-# Pin torch to 2.5.1 to avoid torch._dynamo duplicate dispatch bug in 2.6+
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.5.1
-torchvision==0.20.1
+# torch 2.7.1 + cu128：支持 Blackwell GPU(算力 sm_120，如 RTX PRO Blackwell / RTX 50 系）。
+# 旧版固定 2.5.1+cu121 仅编译到 sm_90，在 Blackwell 上报 "no kernel image available"。
+# 注：cu121 时代曾因 torch._dynamo 重复 dispatch bug 固定 2.5.1，升级后需验证训练优化器构建正常。
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1
+torchvision==0.22.1
 # YOLO11 (ultralytics)
 ultralytics>=8.3.0
 # OpenCV for image processing
