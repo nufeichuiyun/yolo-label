@@ -31,6 +31,7 @@
 | **实例分割标注** | 多边形标注，支持顶点增删、右键操作，精细勾勒目标轮廓 |
 | **AI 预标注** | 上传已有 YOLO11 模型自动为图片生成标注，大幅减少手工工作量 |
 | **一键训练** | 平台内直接训练 YOLO11，实时查看训练进度与指标曲线 |
+| **RKNN 转换（RK3588）** | 训练完成后可自动将 `.pt` 转换为瑞芯微 RK3588 用 `.rknn`（INT8 量化），并打包 PT+RKNN 一键下载，直达边缘部署 |
 | **项目导出与导入** | 完整项目打包（图片+类别+标注）一键导出，支持跨实例迁移与备份 |
 | **权限与协作** | 超级管理员 / 项目管理员 / 标注员三级权限，任务包分配与进度追踪 |
 | **Docker 部署** | 完全容器化，支持 GPU / CPU / 离线部署，无环境依赖 |
@@ -122,6 +123,7 @@ YOLO-Label 内置完整的 YOLO11 训练流程，标注完成后无需离开平�
 6. **下载结果**：训练完成后可下载：
    - `.pt` 模型文件 — 直接用于推理部署
    - 完整训练包（zip）— 包含数据集、模型权重、训练曲线图，方便复现与分享
+   - **PT+RKNN 包（zip）** — 若开启了 RKNN 转换，打包 `.pt` 与 `.rknn` 一并下载（见下）
 
 ### 训练模式
 
@@ -141,6 +143,20 @@ Docker 容器可能无法访问外网下载基础模型，可提前在宿主机�
 ```
 
 脚本会自动下载 YOLO11 全系列模型并复制到容器中，训练时优先使用本地缓存。
+
+### RKNN 转换（部署到 RK3588）
+
+面向瑞芯微 RK3588 边缘设备，平台可在训练完成后自动把 `.pt` 转换为 INT8 量化的 `.rknn`。
+
+1. **发起训练时**勾选 **「训练完成后转换为 RKNN（RK3588，INT8 量化）」**（默认开启）
+2. 训练完成后，转换在后台异步进行；训练历史中会显示 **「RKNN 转换中 → 已转换 RKNN」** 状态
+3. 转换完成后点击 **「下载 PT+RKNN 包」** 获取含 `.pt` 与 `.rknn` 的压缩包
+
+说明：
+
+- **量化校准图**自动复用本次训练的验证集（数量不足时从训练集补足），无需额外准备
+- 转换由独立的 **`rknn-worker`** 容器处理（内置 RKNN Toolkit2，运行于独立 Python 3.10 环境，与主训练环境隔离），**纯 CPU 即可，无需 GPU**
+- 转换链路：`PT → ONNX → RKNN(INT8)`，支持检测与分割模型
 
 ---
 
@@ -200,8 +216,9 @@ cd yolo-label-offline-*
 |------|------|
 | 前端 | React 18 + TypeScript + Ant Design + Fabric.js |
 | 后端 | FastAPI + PostgreSQL 15 + Redis |
-| AI | YOLO11 (ultralytics) + PyTorch |
-| 任务队列 | Celery + Redis |
+| AI | YOLO11 (ultralytics) + PyTorch 2.7（cu128，支持 Blackwell GPU）|
+| 边缘部署 | RKNN Toolkit2（PT→ONNX→RKNN，RK3588）|
+| 任务队列 | Celery + Redis（训练/预标注走默认队列，RKNN 转换走独立 `rknn` 队列）|
 | 部署 | Docker + Docker Compose |
 
 ---
@@ -214,6 +231,8 @@ cd yolo-label-offline-*
 | GPU 不可用 | 确认 `nvidia-smi` 正常，已安装 NVIDIA Container Toolkit |
 | 预标注无结果 | 确认 Celery worker 正常运行：`docker logs yolo-label-celery-worker` |
 | 训练卡在下载模型 | 执行 `./scripts/download_yolo_models.sh` 预下载模型到本地 |
+| RKNN 一直「转换中」/ 转换失败 | 查看转换 worker 日志：`docker logs yolo-label-rknn-worker` |
+| 新 GPU（Blackwell，如 RTX 50 系 / RTX PRO Blackwell）训练报 `no kernel image` | 需 torch ≥2.7+cu128（本项目已默认）；并确认宿主 NVIDIA 驱动 ≥ 570 |
 
 ---
 

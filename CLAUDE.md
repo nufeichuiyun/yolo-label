@@ -9,18 +9,19 @@ YOLO-Label is a web-based YOLO annotation and training platform. It supports obj
 ## Architecture
 
 - **Frontend** (`frontend/`): React 18 + TypeScript + Ant Design + Vite. Canvas annotation via Fabric.js.
-- **Backend** (`backend/`): FastAPI + SQLAlchemy 2.0 + PostgreSQL 15. JWT auth (3-day expiry).
-- **Task Queue**: Celery + Redis for training and pre-annotation jobs. Solo pool mode to avoid CUDA fork issues.
-- **Deployment**: Docker Compose with 5 services (db, redis, backend, celery-worker, frontend). GPU support via `docker-compose.gpu.yml`.
+- **Backend** (`backend/`): FastAPI + SQLAlchemy 2.0 + PostgreSQL 15. JWT auth (3-day expiry). PyTorch 2.7.1+cu128 (supports Blackwell / sm_120 GPUs; base image `nvidia/cuda:12.1.0` — the cu128 wheel bundles its own CUDA 12.8 runtime).
+- **Task Queue**: Celery + Redis. Solo pool mode to avoid CUDA fork issues. Two queues: default `celery` (training, pre-annotation) and `rknn` (RKNN conversion). Routing is set in `app/celery_app.py` (`task_routes`); each worker pins its queue via `-Q`.
+- **Deployment**: Docker Compose with 6 services (db, redis, backend, celery-worker, **rknn-worker**, frontend). GPU support via `docker-compose.gpu.yml`. The `rknn-worker` is a separate image (Python 3.10 + RKNN Toolkit2 2.3.2) built from `rknn_converter/Dockerfile`; it cannot share the main image because RKNN Toolkit2 requires Python 3.10 / torch ≤2.4 / onnx 1.16.1.
 
 ### Key Backend Structure
 - `backend/app/routers/` — 13 API route files under `/api/` prefix
-- `backend/app/services/` — YOLO inference, dataset preparation, training archive
-- `backend/app/tasks/` — Celery tasks for training and pre-annotation
+- `backend/app/services/` — YOLO inference, dataset preparation (incl. `collect_calibration_images` for RKNN quantization), training archive
+- `backend/app/tasks/` — Celery tasks: `training.py`, `preannotation.py`, `rknn_conversion.py` (RKNN, runs only on `rknn-worker`), `_db_task.py` (shared `DatabaseTask` base, kept torch-free so it imports cleanly in the rknn-worker image)
 - `backend/app/models.py` — SQLAlchemy models (users, projects, images, annotations, categories, models, tasks, etc.)
 - `backend/app/schemas.py` — Pydantic request/response schemas
 - `backend/app/database.py` — PostgreSQL connection config
 - `backend/alembic/` — Database migrations
+- `rknn_converter/` — Vendored PT→ONNX→RKNN tool (rockchip-modified ultralytics fork + RKNN Toolkit2 wheel) + `Dockerfile` for the `rknn-worker` image. Not pip-installable into the main env (version conflict).
 
 ### Key Frontend Structure
 - `frontend/src/pages/Annotation/` — Core annotation editor (Fabric.js canvas), split into index.tsx + utils/
@@ -30,7 +31,8 @@ YOLO-Label is a web-based YOLO annotation and training platform. It supports obj
 
 ### Data Flow
 - Images stored in `/app/uploads/`, annotations in YOLO `.txt` format in `/app/annotations/{project_id}/`
-- Training: Celery prepares dataset (train/val split) → runs `ultralytics.YOLO.train()` → saves to `/app/training_output/`
+- Training: Celery prepares dataset (train/val split) → runs `ultralytics.YOLO.train()` → saves to `/app/training_output/`, copies best model to `/app/models/trained_*.pt`
+- RKNN conversion (optional, per training job): on training completion, val (+train top-up) images are copied to `/app/models/calib/{task_id}/` and `convert_to_rknn_task` is dispatched to the `rknn` queue → `rknn-worker` runs the vendored converter (`PT → ONNX → RKNN` INT8) → writes `/app/models/trained_*.rknn`; status tracked on `training_tasks.rknn_status/output_rknn_path/rknn_error`. Download both via the PT+RKNN bundle endpoint.
 - Pre-annotation: Celery runs YOLO inference batch-wise → saves results as annotations
 - Progress tracking via Redis polling
 
