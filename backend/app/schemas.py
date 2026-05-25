@@ -253,6 +253,7 @@ class TrainingTaskCreate(BaseModel):
     imgsz: Optional[int] = 640
     batch: Optional[int] = 16
     train_split: Optional[float] = 0.8
+    convert_to_rknn: Optional[bool] = True  # 训练后转换为 RK3588 RKNN，默认开启
 
 
 class TrainingTaskMetrics(BaseModel):
@@ -278,6 +279,10 @@ class TrainingTaskResponse(BaseModel):
     error_message: Optional[str] = None
     output_model_path: Optional[str] = None
     output_archive_path: Optional[str] = None
+    convert_to_rknn: bool = False
+    rknn_status: Optional[str] = None
+    output_rknn_path: Optional[str] = None
+    rknn_error: Optional[str] = None
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime]

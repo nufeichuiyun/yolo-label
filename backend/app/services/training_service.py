@@ -150,6 +150,73 @@ names:
     return data_yaml_path, len(train_images), len(val_images)
 
 
+_CALIB_IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
+
+
+def collect_calibration_images(
+    dataset_dir: str,
+    dest_dir: str,
+    min_images: int = 20,
+    max_images: int = 200,
+    random_seed: Optional[int] = 42,
+) -> int:
+    """
+    从 prepare_dataset 生成的数据集目录收集 RKNN 量化校准图片。
+
+    优先使用 val 集；若不足 min_images，则从 train 集随机补足；总量封顶 max_images。
+    min_images 为软目标——数据集本身太小时凑不够也不报错。
+
+    Args:
+        dataset_dir: prepare_dataset 的输出目录（含 images/val、images/train）
+        dest_dir: 校准图片输出目录（会被创建/清空）
+        min_images: 期望下限
+        max_images: 上限
+        random_seed: 补足采样的随机种子
+
+    Returns:
+        实际复制的图片数量
+    """
+    val_dir = os.path.join(dataset_dir, "images", "val")
+    train_dir = os.path.join(dataset_dir, "images", "train")
+
+    def _list_images(d: str) -> List[str]:
+        if not os.path.isdir(d):
+            return []
+        return [
+            os.path.join(d, f)
+            for f in sorted(os.listdir(d))
+            if f.lower().endswith(_CALIB_IMG_EXTS)
+        ]
+
+    val_imgs = _list_images(val_dir)
+    selected = list(val_imgs[:max_images])
+
+    if len(selected) < min_images:
+        train_imgs = _list_images(train_dir)
+        if random_seed is not None:
+            random.seed(random_seed)
+        random.shuffle(train_imgs)
+        need = min(min_images, max_images) - len(selected)
+        selected.extend(train_imgs[:max(0, need)])
+
+    # 重建目标目录
+    if os.path.isdir(dest_dir):
+        shutil.rmtree(dest_dir)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    count = 0
+    for i, src in enumerate(selected[:max_images]):
+        # 文件名去空格（RKNN 解析 dataset.txt 时遇空格会截断路径）
+        base = os.path.basename(src).replace(" ", "_")
+        dst = os.path.join(dest_dir, f"{i:04d}_{base}")
+        try:
+            shutil.copy2(src, dst)
+            count += 1
+        except Exception:
+            continue
+    return count
+
+
 def get_default_base_model(annotation_type: str) -> str:
     """根据项目标注类型返回默认基础模型"""
     if annotation_type == "segmentation":

@@ -7,13 +7,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from celery import Task
 from app.celery_app import celery_app
-from app.database import SessionLocal
 from app.models import TrainingTask, Project
-from app.services.training_service import prepare_dataset
+from app.services.training_service import prepare_dataset, collect_calibration_images
 from app.services.training_archive_service import create_training_archive
-from sqlalchemy.orm import Session
+from app.tasks._db_task import DatabaseTask
 
 try:
     import torch
@@ -43,23 +41,6 @@ def _resolve_batch(batch: int, has_gpu: bool) -> int:
     if batch is not None and batch > 0:
         return batch
     return -1 if has_gpu else 16  # -1 = ultralytics 自动检测最优 batch
-
-
-class DatabaseTask(Task):
-    """带数据库会话的任务基类"""
-    _db: Session = None
-
-    @property
-    def db(self):
-        if self._db is None:
-            self._db = SessionLocal()
-        return self._db
-
-    def after_return(self, *args, **kwargs):
-        """任务完成后关闭数据库会话"""
-        if self._db:
-            self._db.close()
-            self._db = None
 
 
 @celery_app.task(bind=True, base=DatabaseTask)
@@ -191,6 +172,15 @@ def train_model_task(
                 shutil.copy2(last_pt, final_model_path)
                 task.output_model_path = final_model_name
 
+            # 3.5 若需 RKNN 转换：在临时目录销毁前，把 val(不足则补 train)图片复制为量化校准集
+            if task.convert_to_rknn and task.output_model_path:
+                try:
+                    calib_dir = os.path.join(MODEL_DIR, "calib", str(task.id))
+                    n_calib = collect_calibration_images(tmpdir, calib_dir)
+                    print(f"[training] 已准备 {n_calib} 张量化校准图片 -> {calib_dir}", flush=True)
+                except Exception as e:
+                    print(f"[training] 准备量化校准图片失败（将跳过 RKNN 转换）: {e}", flush=True)
+
             # 4. 创建训练完整包 zip（数据集+模型+训练曲线）
             try:
                 archive_path = create_training_archive(
@@ -208,10 +198,29 @@ def train_model_task(
 
             print("[training] 训练子进程已退出，内存已由 OS 回收", flush=True)
 
+        # 是否进行 RKNN 转换：需勾选、有产出模型、且校准图片已就绪
+        calib_dir = os.path.join(MODEL_DIR, "calib", str(task.id))
+        will_convert = bool(task.convert_to_rknn and task.output_model_path and os.path.isdir(calib_dir))
+
         task.status = "completed"
         task.progress = 100
         task.current_epoch = epochs
+        if will_convert:
+            # 与 completed 同一次提交置为 pending，避免前端看到 completed 但 rknn_status 为空的间隙
+            task.rknn_status = "pending"
         db.commit()
+
+        # 5. 训练完成后异步派发 RKNN 转换（独立 rknn 队列，由专用 worker 处理）
+        if will_convert:
+            try:
+                from app.tasks.rknn_conversion import convert_to_rknn_task
+                convert_to_rknn_task.delay(training_task_id=task.id)
+                print(f"[training] 已派发 RKNN 转换任务 training_task_id={task.id}", flush=True)
+            except Exception as e:
+                task.rknn_status = "failed"
+                task.rknn_error = f"派发 RKNN 转换任务失败: {e}"
+                db.commit()
+                print(f"[training] 派发 RKNN 转换任务失败（不影响训练结果）: {e}", flush=True)
 
         return {
             "message": "训练完成",

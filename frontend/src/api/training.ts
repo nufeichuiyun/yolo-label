@@ -22,6 +22,10 @@ export interface TrainingTask {
   error_message?: string
   output_model_path?: string
   output_archive_path?: string
+  convert_to_rknn?: boolean
+  rknn_status?: 'pending' | 'converting' | 'completed' | 'failed'
+  output_rknn_path?: string
+  rknn_error?: string
   created_by: number
   created_at: string
   updated_at?: string
@@ -35,6 +39,7 @@ export interface TrainingTaskCreate {
   imgsz?: number
   batch?: number
   train_split?: number
+  convert_to_rknn?: boolean
 }
 
 export interface BaseModelOption {
@@ -119,6 +124,38 @@ export const trainingApi = {
     const a = document.createElement('a')
     a.href = url
     a.download = filename || `training_${taskId}.zip`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  },
+
+  // 下载 PT + RKNN 模型包（zip）
+  downloadBundle: async (taskId: string, filename: string): Promise<void> => {
+    const response = await client.get(`/api/training/download-bundle/${taskId}`, {
+      responseType: 'blob',
+      validateStatus: () => true, // 不自动抛出，手动检查
+    })
+    if (response.status >= 400) {
+      if (response.status === 401) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+        return
+      }
+      const text = await (response.data as Blob).text()
+      let detail = '下载失败'
+      try {
+        const parsed = JSON.parse(text)
+        detail = parsed.detail || detail
+      } catch {
+        if (text) detail = text
+      }
+      throw new Error(detail)
+    }
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `model_bundle_${taskId}.zip`
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)

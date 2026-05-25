@@ -200,6 +200,10 @@ class TrainingTask(Base):
     error_message = Column(Text)  # 错误信息
     output_model_path = Column(String(500))  # 输出模型路径（完成后）
     output_archive_path = Column(String(500))  # 完整训练包 zip 路径（数据集+模型+训练曲线）
+    convert_to_rknn = Column(Boolean, default=False)  # 是否在训练后转换为 RK3588 RKNN
+    rknn_status = Column(String(50))  # None/pending/converting/completed/failed
+    output_rknn_path = Column(String(500))  # 转换后 .rknn 文件名（位于 MODEL_DIR）
+    rknn_error = Column(Text)  # RKNN 转换失败信息
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

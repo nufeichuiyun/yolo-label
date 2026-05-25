@@ -4,9 +4,12 @@
 import json
 import logging
 import os
+import tempfile
 import uuid
+import zipfile
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -87,6 +90,7 @@ async def create_training_task(
     imgsz = task_data.imgsz or 640
     batch = task_data.batch if task_data.batch is not None else 16  # 0=自动根据显存
     train_split = task_data.train_split or 0.8
+    convert_to_rknn = True if task_data.convert_to_rknn is None else task_data.convert_to_rknn
 
     task_id = str(uuid.uuid4())
     db_task = TrainingTask(
@@ -99,6 +103,7 @@ async def create_training_task(
         current_epoch=0,
         train_images=0,
         val_images=0,
+        convert_to_rknn=convert_to_rknn,
         created_by=current_user.id
     )
     db.add(db_task)
@@ -273,4 +278,50 @@ async def download_training_archive(
         file_path,
         media_type="application/zip",
         filename=os.path.basename(task.output_archive_path)
+    )
+
+
+@router.get("/download-bundle/{task_id}")
+async def download_pt_rknn_bundle(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """下载 PT + RKNN 模型包（zip，含 .pt 与 .rknn 两个文件）"""
+    task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    check_project_permission(task.project_id, current_user, db)
+
+    if task.status != "completed":
+        raise HTTPException(status_code=400, detail="任务未完成，无法下载模型包")
+    if not task.output_model_path:
+        raise HTTPException(status_code=404, detail="未找到 .pt 模型")
+
+    pt_path = os.path.join(MODEL_DIR, task.output_model_path)
+    if not os.path.exists(pt_path):
+        raise HTTPException(status_code=404, detail="模型文件不存在")
+
+    if task.rknn_status != "completed" or not task.output_rknn_path:
+        raise HTTPException(status_code=400, detail="RKNN 尚未转换完成，无法下载模型包")
+    rknn_path = os.path.join(MODEL_DIR, task.output_rknn_path)
+    if not os.path.exists(rknn_path):
+        raise HTTPException(status_code=404, detail="RKNN 文件不存在")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp.close()
+    try:
+        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(pt_path, os.path.basename(pt_path))
+            zf.write(rknn_path, os.path.basename(rknn_path))
+    except Exception:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+        raise
+
+    return FileResponse(
+        tmp.name,
+        media_type="application/zip",
+        filename=f"model_bundle_{task_id}.zip",
+        background=BackgroundTask(os.unlink, tmp.name),
     )

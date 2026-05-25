@@ -760,7 +760,28 @@ ${gpu_env_section}
       redis:
         condition: service_healthy
 ${gpu_deploy_section}
-    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1
+    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q celery
+
+  rknn-worker:
+    build:
+      context: .
+      dockerfile: rknn_converter/Dockerfile
+    container_name: yolo-label-rknn-worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_DIR=/app/models
+      - QT_QPA_PLATFORM=offscreen
+      - DISPLAY=
+    volumes:
+      - ./models:/app/models
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q rknn
 
   frontend:
     build:
@@ -932,7 +953,7 @@ health_check() {
     echo ""
 
     local all_healthy=true
-    local services=("yolo-label-db:数据库" "yolo-label-redis:Redis" "yolo-label-backend:后端API" "yolo-label-celery-worker:Celery Worker" "yolo-label-frontend:前端界面")
+    local services=("yolo-label-db:数据库" "yolo-label-redis:Redis" "yolo-label-backend:后端API" "yolo-label-celery-worker:Celery Worker" "yolo-label-rknn-worker:RKNN Worker" "yolo-label-frontend:前端界面")
 
     for item in "${services[@]}"; do
         local container="${item%%:*}"

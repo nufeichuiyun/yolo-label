@@ -8,6 +8,10 @@ models/yolo11x.pt
 models/yolo11x-seg.pt
 # 训练输出模型不纳入版本控制
 models/trained_*.pt
+# RKNN 转换产物与量化校准图(运行期生成)不纳入版本控制
+models/*.rknn
+models/*.onnx
+models/calib/
 *.py[cod]
 *$py.class
 *.so
@@ -60,6 +64,7 @@ yarn-error.log*
 .env.local
 .env.prod
 docker-compose.prod.yml
+docker-compose.override.yml
 
 # 部署生成的敏感文件
 .credentials

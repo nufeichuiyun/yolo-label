@@ -81,7 +81,7 @@ export default function ProjectDetail() {
   const [trainingPollingInterval, setTrainingPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
   const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
-  const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16, train_split: 0.8 })
+  const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16, train_split: 0.8, convert_to_rknn: true })
   const [startingTraining, setStartingTraining] = useState(false)
   
   const { user } = useAuth()
@@ -275,8 +275,20 @@ export default function ProjectDetail() {
       const task = await trainingApi.getTask(taskId)
       setCurrentTrainingTask(task)
       if (task.status === 'completed') {
+        // 若请求了 RKNN 转换且仍在进行，继续轮询直到转换结束（成功/失败）
+        const rknnInProgress = task.rknn_status === 'pending' || task.rknn_status === 'converting'
+        if (rknnInProgress) {
+          loadTrainingHistory()
+          return
+        }
         setTrainingPollingInterval(prev => { if (prev) clearInterval(prev); return null })
-        message.success('模型训练已完成')
+        if (task.rknn_status === 'completed') {
+          message.success('模型训练与 RKNN 转换已完成')
+        } else if (task.rknn_status === 'failed') {
+          message.warning('模型训练完成，但 RKNN 转换失败')
+        } else {
+          message.success('模型训练已完成')
+        }
         setCurrentTrainingTask(null)
         setTimeout(() => {
           if (projectId) {
@@ -315,6 +327,7 @@ export default function ProjectDetail() {
         imgsz: trainingConfig.imgsz,
         batch: trainingConfig.batch,
         train_split: trainingConfig.train_split,
+        convert_to_rknn: trainingConfig.convert_to_rknn,
       })
       message.success('训练任务已启动，将在后台执行')
       setTrainingModalVisible(false)
@@ -364,6 +377,16 @@ export default function ProjectDetail() {
     try {
       await trainingApi.downloadArchive(task.task_id, task.output_archive_path.split('/').pop() || `training_${task.task_id}.zip`)
       message.success('完整包下载成功')
+    } catch (error: any) {
+      message.error(error?.message || error?.response?.data?.detail || '下载失败')
+    }
+  }
+
+  const handleDownloadBundle = async (task: TrainingTask) => {
+    if (task.rknn_status !== 'completed') return
+    try {
+      await trainingApi.downloadBundle(task.task_id, `model_bundle_${task.id}.zip`)
+      message.success('PT+RKNN 包下载成功')
     } catch (error: any) {
       message.error(error?.message || error?.response?.data?.detail || '下载失败')
     }
@@ -1356,6 +1379,17 @@ export default function ProjectDetail() {
                 </div>
               )}
             </div>
+            <div>
+              <Checkbox
+                checked={trainingConfig.convert_to_rknn}
+                onChange={(e) => setTrainingConfig(prev => ({ ...prev, convert_to_rknn: e.target.checked }))}
+              >
+                训练完成后转换为 RKNN（RK3588，INT8 量化）
+              </Checkbox>
+              <div style={{ marginTop: 4, fontSize: '12px', color: '#999' }}>
+                自动把训练得到的 .pt 转换为可部署到 RK3588 的 .rknn，使用验证集（不足时从训练集补足）作为量化校准图片。转换在后台进行，完成后可下载 PT+RKNN 包。
+              </div>
+            </div>
             <div style={{ textAlign: 'right' }}>
               <Space>
                 <Button onClick={() => setTrainingModalVisible(false)}>取消</Button>
@@ -1520,12 +1554,28 @@ export default function ProjectDetail() {
                         下载完整包
                       </Button>
                     ),
+                    task.rknn_status === 'completed' && (
+                      <Button key="download-bundle" type="link" onClick={() => handleDownloadBundle(task)}>
+                        下载 PT+RKNN 包
+                      </Button>
+                    ),
                   ].filter(Boolean) : []}
                 >
                   <List.Item.Meta
                     title={
                       <Space>
                         <Tag color={config.color}>{config.text}</Tag>
+                        {task.status === 'completed' && task.convert_to_rknn && (
+                          task.rknn_status === 'completed' ? (
+                            <Tag color="success">已转换 RKNN</Tag>
+                          ) : task.rknn_status === 'failed' ? (
+                            <Tooltip title={task.rknn_error || 'RKNN 转换失败'}>
+                              <Tag color="error">RKNN 转换失败</Tag>
+                            </Tooltip>
+                          ) : (
+                            <Tag color="processing">RKNN 转换中</Tag>
+                          )
+                        )}
                         <span>任务 #{task.id}</span>
                         <span style={{ fontSize: '12px', color: '#999' }}>{task.base_model}</span>
                       </Space>
