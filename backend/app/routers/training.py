@@ -156,30 +156,35 @@ async def revoke_training_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """中断/停止正在进行的训练任务"""
+    """中断/停止正在进行的训练任务（即使 Redis 映射丢失也会强制标记为失败，避免任务卡死）"""
     task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     check_project_permission(task.project_id, current_user, db, required_role=UserRole.PROJECT_ADMIN)
 
-    if task.status != "running":
-        raise HTTPException(status_code=400, detail="只能中断正在运行的任务")
+    if task.status not in ("running", "pending"):
+        raise HTTPException(status_code=400, detail="只能中断未完成的任务")
 
-    import redis
+    # 尝试通过 Redis 找回 Celery 任务 ID 并 revoke。失败不影响 DB 状态更新
+    # （Redis 重启或映射过期时，Celery 那边任务可能已经死了，但 DB 仍是 running，必须强制清理）
+    revoke_sent = False
     try:
+        import redis
         r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
         celery_task_id = r.get(f"{CELERY_TASK_KEY_PREFIX}{task_id}")
         if celery_task_id:
             celery_task_id = celery_task_id.decode() if isinstance(celery_task_id, bytes) else celery_task_id
             celery_app.control.revoke(celery_task_id, terminate=True)
-            task.status = "failed"
-            task.error_message = "用户中断"
-            db.commit()
-            return {"message": "已发送停止信号，任务将尽快终止"}
+            revoke_sent = True
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
+        logging.warning("revoke 训练任务时联系 Celery/Redis 失败 task_id=%s err=%s", task_id, e)
 
-    raise HTTPException(status_code=400, detail="未找到对应的 Celery 任务，可能已完成或已过期")
+    task.status = "failed"
+    task.error_message = "用户中断" if revoke_sent else "用户中断（未找到 Celery 映射，仅清理 DB 状态）"
+    db.commit()
+
+    msg = "已发送停止信号，任务将尽快终止" if revoke_sent else "未找到对应的 Celery 任务（可能 Redis 重启），已强制清理任务状态"
+    return {"message": msg}
 
 
 @router.get("/project/{project_id}", response_model=List[TrainingTaskResponse])

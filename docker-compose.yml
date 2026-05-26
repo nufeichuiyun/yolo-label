@@ -18,9 +18,13 @@ services:
       retries: 5
 
   # Redis（用于缓存和任务队列）
+  # 启用 AOF 持久化 + 数据卷，确保宿主机异常关机后训练任务的 Celery 映射等 key 不丢
   redis:
     image: redis:7-alpine
     container_name: yolo-label-redis
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
     ports:
       - "6379:6379"
     healthcheck:
@@ -146,3 +150,4 @@ volumes:
   uploads_data:
   annotations_data:
   training_output_data:
+  redis_data:

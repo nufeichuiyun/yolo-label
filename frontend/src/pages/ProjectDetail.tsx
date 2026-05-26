@@ -1492,33 +1492,65 @@ export default function ProjectDetail() {
             </Space>
           </Card>
             ) : (
-              /* 最小化状态：点击可重新展开 */
-              <Tooltip title="点击展开训练进度">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setTrainingFloatVisible(true)}
-                  onKeyDown={(e) => e.key === 'Enter' && setTrainingFloatVisible(true)}
-                  style={{
-                    position: 'fixed',
-                    bottom: 20,
-                    right: 20,
-                    zIndex: 1000,
-                    padding: '8px 16px',
-                    background: '#1890ff',
-                    color: '#fff',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    boxShadow: '0 2px 8px rgba(24,144,255,0.4)',
-                  }}
+              /* 最小化状态：点击主区域展开；右侧独立停止按钮可直接中断（无需先展开） */
+              <div
+                style={{
+                  position: 'fixed',
+                  bottom: 20,
+                  right: 20,
+                  zIndex: 1000,
+                  background: '#1890ff',
+                  color: '#fff',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'stretch',
+                  boxShadow: '0 2px 8px rgba(24,144,255,0.4)',
+                  overflow: 'hidden',
+                }}
+              >
+                <Tooltip title="点击展开训练进度">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setTrainingFloatVisible(true)}
+                    onKeyDown={(e) => e.key === 'Enter' && setTrainingFloatVisible(true)}
+                    style={{
+                      padding: '8px 12px 8px 16px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <ThunderboltOutlined />
+                    <span>训练进行中 {currentTrainingTask.progress}%</span>
+                  </div>
+                </Tooltip>
+                <Popconfirm
+                  title="确认停止"
+                  description="确定要停止当前训练任务吗？已训练的进度将丢失。"
+                  onConfirm={handleRevokeTraining}
+                  okText="停止"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
                 >
-                  <ThunderboltOutlined />
-                  <span>训练进行中 {currentTrainingTask.progress}%</span>
-                </div>
-              </Tooltip>
+                  <Tooltip title="停止训练">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        borderLeft: '1px solid rgba(255,255,255,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <StopOutlined />
+                    </div>
+                  </Tooltip>
+                </Popconfirm>
+              </div>
             )}
           </>
         )}
