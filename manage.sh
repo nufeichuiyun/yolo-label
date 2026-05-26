@@ -729,7 +729,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --timeout-keep-alive 300 --timeout-graceful-shutdown 300
+    # 启动前自动应用数据库迁移，避免模型与表结构漂移
+    command: sh -c "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --timeout-keep-alive 300 --timeout-graceful-shutdown 300"
 
   celery-worker:
     build:
