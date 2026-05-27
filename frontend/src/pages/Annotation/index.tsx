@@ -242,8 +242,16 @@ export default function Annotation() {
     if (loadingAllImagesRef.current) return
     loadingAllImagesRef.current = true
     try {
-      const data = await imagesApi.list(Number(projectId), 0, 10000)
-      const sortedImages = [...data.items].sort((a, b) => a.id - b.id)
+      const BATCH = 1000
+      const all: Image[] = []
+      let skip = 0
+      while (true) {
+        const data = await imagesApi.list(Number(projectId), skip, BATCH)
+        all.push(...data.items)
+        if (data.items.length < BATCH || all.length >= data.total) break
+        skip += BATCH
+      }
+      const sortedImages = all.sort((a, b) => a.id - b.id)
       setAllImages(sortedImages)
     } catch (error) {
       console.error('加载图片列表失败:', error)

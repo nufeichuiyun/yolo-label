@@ -34,6 +34,9 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const [project, setProject] = useState<Project | null>(null)
   const [images, setImages] = useState<Image[]>([])
+  const [totalImages, setTotalImages] = useState(0)
+  const [imagesPage, setImagesPage] = useState(1)
+  const [imagesPageSize, setImagesPageSize] = useState(20)
   const [stats, setStats] = useState<ProjectStats | null>(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false) // 上传状态标记
@@ -96,12 +99,15 @@ export default function ProjectDetail() {
     }
   }
 
-  const loadImages = async () => {
+  const loadImages = async (page = imagesPage, pageSize = imagesPageSize) => {
     setLoading(true)
     try {
-      const data = await imagesApi.list(Number(projectId), 0, 1000)
+      const skip = (page - 1) * pageSize
+      const data = await imagesApi.list(Number(projectId), skip, pageSize)
       setImages(data.items)
-      console.log('加载图片列表:', data.items.length, '张图片')
+      setTotalImages(data.total)
+      setImagesPage(page)
+      setImagesPageSize(pageSize)
     } catch (error) {
       console.error('加载图片列表失败:', error)
       message.error('加载图片列表失败')
@@ -838,7 +844,7 @@ export default function ProjectDetail() {
               type="primary" 
               icon={<RobotOutlined />} 
               onClick={handleOpenPreannotationModal}
-              disabled={images.length === 0}
+              disabled={totalImages === 0}
             >
               AI预标注
             </Button>
@@ -1218,7 +1224,7 @@ export default function ProjectDetail() {
                   {uploading ? '上传中...' : '上传图片'}
                 </Button>
               </Upload>
-              {images.length > 0 && (
+              {totalImages > 0 && (
                 <Dropdown
                   menu={{
                     items: [
@@ -1241,11 +1247,17 @@ export default function ProjectDetail() {
             dataSource={images}
             rowKey="id"
             loading={loading}
-            pagination={{ 
-              pageSize: 20,
+            pagination={{
+              current: imagesPage,
+              pageSize: imagesPageSize,
+              total: totalImages,
               showTotal: (total) => `共 ${total} 张图片`,
               showSizeChanger: true,
               showQuickJumper: true,
+              pageSizeOptions: ['10', '20', '50', '100', '200'],
+              onChange: (page, pageSize) => {
+                loadImages(page, pageSize)
+              },
             }}
           />
         </Card>
@@ -2090,7 +2102,7 @@ export default function ProjectDetail() {
               </div>
             )}
             <div style={{ marginBottom: 16 }}>
-              <strong>当前项目图片总数：</strong>{images.length} 张
+              <strong>当前项目图片总数：</strong>{totalImages} 张
             </div>
             <div style={{ marginBottom: 16 }}>
               <strong>每个任务包的图片张数：</strong>
@@ -2106,13 +2118,13 @@ export default function ProjectDetail() {
             {reassignImagesPerTask > 0 && (
               <div style={{ marginTop: 16, padding: 12, background: '#f0f0f0', borderRadius: 4 }}>
                 <div><strong>预计创建任务包数量：</strong>
-                  {Math.ceil(images.length / reassignImagesPerTask)} 个
+                  {Math.ceil(totalImages / reassignImagesPerTask)} 个
                 </div>
                 <div style={{ marginTop: 8 }}>
                   <strong>分配情况：</strong>
-                  {Array.from({ length: Math.ceil(images.length / reassignImagesPerTask) }, (_, i) => {
+                  {Array.from({ length: Math.ceil(totalImages / reassignImagesPerTask) }, (_, i) => {
                     const start = i * reassignImagesPerTask
-                    const end = Math.min(start + reassignImagesPerTask, images.length)
+                    const end = Math.min(start + reassignImagesPerTask, totalImages)
                     const count = end - start
                     return (
                       <div key={i} style={{ marginTop: 4 }}>
