@@ -1241,8 +1241,8 @@ export default function Annotation() {
           }}>
             返回
           </Button>
-          <span>标注工具</span>
-          <span style={{ marginLeft: 16, color: '#fff', fontSize: '14px' }}>
+          <span style={{ whiteSpace: 'nowrap' }}>标注工具</span>
+          <span style={{ marginLeft: 16, color: '#fff', fontSize: '14px', whiteSpace: 'nowrap' }}>
             {progressInfo.isTaskProgress && currentTask ? (
               <>工作包进度 ({currentTask.name}): 已标注 {progressInfo.annotated} 张 / 共 {progressInfo.total} 张 ({progressInfo.percentage}%)</>
             ) : (
@@ -1252,7 +1252,7 @@ export default function Annotation() {
               <>  ·  当前第 {currentPosition} 张 / 共 {totalImages} 张</>
             )}
           </span>
-          <span style={{ marginLeft: 8, color: '#999', fontSize: '12px' }}>
+          <span style={{ marginLeft: 8, color: '#999', fontSize: '12px', whiteSpace: 'nowrap' }}>
             A键上一张 | D键下一张 | 自动保存 | 滚轮缩放 | 右键拖动平移 | 右键单击循环切换类别
             {project?.annotation_type === 'detection' && ' | 单击开始画框 | 再次单击完成 | Esc取消'}
             {project?.annotation_type === 'segmentation' && ' | 点击绘制多边形 | 双击/Enter完成 | Esc完成(≥3点)或取消 | 画多边形时右键删除最后一点'}

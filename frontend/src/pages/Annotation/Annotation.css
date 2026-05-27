@@ -11,6 +11,7 @@
   position: relative;
   z-index: 1000;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 /* 确保header内的所有元素都可以交互 */
