@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python"></a>
   <a href="https://reactjs.org/"><img src="https://img.shields.io/badge/React-18.2+-blue.svg" alt="React"></a>
   <a href="https://github.com/ultralytics/ultralytics"><img src="https://img.shields.io/badge/YOLO-11-green.svg" alt="YOLO11"></a>
@@ -142,7 +142,7 @@ Docker 容器可能无法访问外网下载基础模型，可提前在宿主机�
 ./scripts/download_yolo_models.sh
 ```
 
-脚本会自动下载 YOLO11 全系列模型并复制到容器中，训练时优先使用本地缓存。
+脚本会把 YOLO11 全系列模型下载到本地 `models/` 目录（该目录已通过 Docker 卷挂载进容器），训练时优先使用本地缓存。
 
 ### RKNN 转换（部署到 RK3588）
 
@@ -246,7 +246,9 @@ cd yolo-label-offline-*
 
 ## 许可证
 
-[MIT License](./LICENSE)
+本项目采用 [GNU AGPL-3.0](./LICENSE) 许可证。
+
+> 本项目的模型训练与推理基于 [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)（AGPL-3.0 许可）。依据 AGPL-3.0，若将本项目作为网络服务对外提供，需向使用者公开对应的源代码；如需用于闭源商业场景以规避 AGPL 义务，请向 Ultralytics 申请商业授权。
 
 ## 致谢
 
