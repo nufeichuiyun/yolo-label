@@ -113,7 +113,7 @@ cmd.exe 解析 `.bat` 文件时使用系统 ANSI 编码（中文系统下为 GBK
 
 ### 训练失败：`Duplicate dispatch rule for <built-in function intern>`
 
-PyTorch 2.6+ 在某些环境下存在 `torch._dynamo` 重复注册的 bug。本项目已在 `backend/requirements.txt` 中固定 `torch==2.5.1`（cu121 构建）规避，无需手动处理。如果遇到类似报错，先确认镜像是用当前仓库的 requirements.txt 重新构建过（控制面板 `7. 重建镜像`）。
+PyTorch 2.6+ 在某些环境下存在 `torch._dynamo` 重复注册的 bug。本项目当前使用 `torch==2.7.1`（cu128 构建，支持 Blackwell GPU）；如果遇到该报错，先确认镜像是用当前仓库的 requirements.txt 重新构建过（控制面板 `7. 重建镜像`）。
 
 ## 6. 日常使用
 

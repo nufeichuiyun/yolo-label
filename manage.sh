@@ -1083,7 +1083,7 @@ print_summary() {
         echo -e "  ${YELLOW}${BOLD}安全提醒：${NC}"
         echo -e "    ${YELLOW}•${NC} 凭据已保存在 ${DIM}.credentials${NC} 文件中，请妥善保管后删除"
         echo -e "    ${YELLOW}•${NC} 生产环境建议配置 HTTPS（使用 Nginx 反向代理）"
-        echo -e "    ${YELLOW}•${NC} 请定期备份数据（参考 README.md 中的备份说明）"
+        echo -e "    ${YELLOW}•${NC} 请定期备份数据库与上传目录（PostgreSQL 数据卷、uploads/）"
         echo ""
     fi
 }

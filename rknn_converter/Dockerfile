@@ -1,6 +1,6 @@
 # RKNN 转换 worker 镜像
 # 独立于主后端：Python 3.10 + RKNN Toolkit2 2.3.2 + torch<=2.4.0 + onnx==1.16.1
-# 不能与主 worker(py3.11/torch2.5.1)共存，故单独成容器，仅消费 Celery 的 rknn 队列。
+# 不能与主 worker(py3.11/torch2.7.1)共存，故单独成容器，仅消费 Celery 的 rknn 队列。
 # 构建上下文必须为仓库根目录(才能同时 COPY rknn_converter/ 与 backend/app)。
 
 FROM python:3.10-slim-bookworm
