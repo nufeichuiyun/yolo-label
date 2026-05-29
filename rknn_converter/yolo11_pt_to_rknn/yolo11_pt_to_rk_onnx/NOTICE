@@ -1,0 +1,54 @@
+NOTICE
+======
+
+This directory (`yolo11_pt_to_rk_onnx/`) contains a MODIFIED version of
+Ultralytics YOLO, redistributed under the GNU Affero General Public License
+version 3.0 (AGPL-3.0). The full license text is in the accompanying LICENSE
+file.
+
+本目录（`yolo11_pt_to_rk_onnx/`）包含 Ultralytics YOLO 的**修改版**，依据
+GNU AGPL-3.0 许可证再分发；完整许可证见同目录 LICENSE 文件。
+
+--------------------------------------------------------------------------------
+Original work / 原始作品
+--------------------------------------------------------------------------------
+  Project    : Ultralytics YOLO (YOLO11)
+  Version    : 8.3.9  (ultralytics/__init__.py: __version__ = "8.3.9")
+  Copyright  : © Ultralytics
+  License    : AGPL-3.0
+  Source     : https://github.com/ultralytics/ultralytics
+
+--------------------------------------------------------------------------------
+Modifications / 修改说明
+--------------------------------------------------------------------------------
+This copy is NOT the official Ultralytics release. It is the Rockchip-adapted
+fork that adds RK35xx (e.g. RK3588) NPU export support. The modifications
+introduce an `export && format == 'rknn'` code path emitting RKNN-friendly
+output tensors, chiefly in:
+
+  - ultralytics/nn/modules/head.py   RKNN export branches for the Detect /
+                                     Segment / OBB / Pose / Classify heads
+  - ultralytics/engine/exporter.py   RKNN export format and `export_rknn()`
+  - ultralytics/nn/autobackend.py    RKNN backend flag
+
+These RKNN changes originate from Rockchip (airockchip):
+  - https://github.com/airockchip/ultralytics_yolo11
+  - https://github.com/airockchip/rknn_model_zoo
+
+本副本**不是** Ultralytics 官方发行版，而是 Rockchip（airockchip）为 RK35xx
+（如 RK3588）NPU 导出适配的分支：在 head.py / exporter.py / autobackend.py 等
+处新增了 `format == 'rknn'` 导出分支。上述 RKNN 改动来自 Rockchip，见上方链接。
+
+--------------------------------------------------------------------------------
+Use within YOLO-Label / 在 YOLO-Label 中的使用
+--------------------------------------------------------------------------------
+YOLO-Label vendors this fork as-is, solely to run the offline
+`PT → ONNX → RKNN` conversion pipeline inside the `rknn-worker` container.
+YOLO-Label made no further changes to the Ultralytics source.
+
+Because this component is AGPL-3.0, the project as a whole is distributed under
+AGPL-3.0 (see the repository-root LICENSE file).
+
+YOLO-Label 原样收录该分支，仅用于 `rknn-worker` 容器内离线执行
+`PT → ONNX → RKNN` 转换，未对 Ultralytics 源码做进一步改动。由于该组件为
+AGPL-3.0，整个项目亦以 AGPL-3.0 分发（见仓库根目录 LICENSE）。
