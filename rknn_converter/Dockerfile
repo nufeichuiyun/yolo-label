@@ -39,9 +39,19 @@ RUN cd install_rknn && \
     pip install --no-cache-dir rknn_toolkit2-2.3.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 # 步骤2: 安装 YOLO11 导出依赖(含 onnxscript，torch.onnx.export 所需)
+# 国内镜像在构建高并发下抓取大索引页(ultralytics/torch 等)偶发 SSL UNEXPECTED_EOF，
+# 故追加官方源兜底 + 提高重试/超时；不改上方 pip.conf 以保留 RKNN 大层缓存。
 RUN cd yolo11_pt_to_rk_onnx && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir onnxscript
+    pip install --no-cache-dir -r requirements.txt \
+      --extra-index-url https://pypi.org/simple \
+      --retries 15 --timeout 120
+# onnxscript：国内 pip 镜像该包索引页在构建高并发下 SSL 偶发中断(UNEXPECTED_EOF)，
+# 故预置 wheel 并用 --find-links 兜底，索引抓取失败也不阻断构建。
+# 单独 COPY 到 /tmp，避免污染上方 yolo11_pt_to_rknn 大目录的 COPY 缓存。
+COPY rknn_converter/_onnx_wheels /tmp/onnx_wheels
+RUN pip install --no-cache-dir --find-links=/tmp/onnx_wheels onnxscript \
+      --extra-index-url https://pypi.org/simple \
+      --retries 15 --timeout 120
 
 # 步骤3: 固定 onnx 版本以兼容 RKNN Toolkit2
 RUN pip install --no-cache-dir "onnx==1.16.1"
