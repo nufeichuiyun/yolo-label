@@ -12,15 +12,21 @@ import os
 
 def _cleanup_orphan_tasks() -> None:
     """
-    后端启动时清扫"孤儿"任务：把所有 status='running'/'pending' 的 Celery 关联任务
-    标记为 failed。原因：worker 用 solo pool + concurrency=1，后端启动那一刻不可能
-    真有任务正在运行；任何遗留的 running/pending 都是上次异常关机的残留，必须清理，
+    后端启动时清扫"孤儿"任务：把上次异常关机残留的 running/pending 任务标记为 failed，
     否则会触发"该项目已有训练任务正在运行"等校验导致死锁。
+
+    注意（关键）：不能假设"后端启动时不可能有任务在跑"。后端与 worker 是独立容器、
+    可各自重启；worker 用 solo pool，长任务（训练/转换）期间主进程被完全阻塞，连
+    Celery 心跳/inspect 都无法应答，因此判断"是否在跑"不能依赖 inspect。改为依据由
+    未被阻塞的组件主动写入的 Redis 短 TTL 心跳（见 app.task_heartbeat）：
+    有心跳=真在跑，跳过；无心跳=孤儿，清扫。这样后端重启不会误杀正在运行的任务。
+    （仍在队列等待、尚未启动的 pending 无心跳会被标 failed，但 worker 真正执行它时会
+    重新置为 running，可自愈，无害。）
     """
     try:
-        from sqlalchemy import or_
         from app.database import SessionLocal
         from app.models import TrainingTask, PreAnnotationTask
+        from app.task_heartbeat import alive_keys
     except Exception as e:
         logging.warning("启动清扫孤儿任务跳过（导入失败）: %s", e)
         return
@@ -28,31 +34,49 @@ def _cleanup_orphan_tasks() -> None:
     db = SessionLocal()
     try:
         msg = "后端启动时清扫（上次未正常结束）"
-        n_train = (
+
+        # 训练：按 task_id(UUID) 匹配心跳
+        train_rows = (
             db.query(TrainingTask)
             .filter(TrainingTask.status.in_(["running", "pending"]))
-            .update(
-                {TrainingTask.status: "failed", TrainingTask.error_message: msg},
-                synchronize_session=False,
-            )
+            .all()
         )
-        # 训练任务里 rknn 在独立 worker 上，但 worker 同样单并发；启动时也不可能在跑
-        n_rknn = (
+        train_alive = alive_keys(t.task_id for t in train_rows)
+        n_train = 0
+        for t in train_rows:
+            if t.task_id not in train_alive:
+                t.status = "failed"
+                t.error_message = msg
+                n_train += 1
+
+        # RKNN：在独立 rknn-worker 上转换，心跳键加 rknn: 前缀、按整数主键 id 匹配
+        rknn_rows = (
             db.query(TrainingTask)
             .filter(TrainingTask.rknn_status.in_(["pending", "converting"]))
-            .update(
-                {TrainingTask.rknn_status: "failed", TrainingTask.rknn_error: msg},
-                synchronize_session=False,
-            )
+            .all()
         )
-        n_pre = (
+        rknn_alive = alive_keys(f"rknn:{t.id}" for t in rknn_rows)
+        n_rknn = 0
+        for t in rknn_rows:
+            if f"rknn:{t.id}" not in rknn_alive:
+                t.rknn_status = "failed"
+                t.rknn_error = msg
+                n_rknn += 1
+
+        # 预标注：同样按 task_id(UUID) 匹配心跳
+        pre_rows = (
             db.query(PreAnnotationTask)
             .filter(PreAnnotationTask.status.in_(["running", "pending"]))
-            .update(
-                {PreAnnotationTask.status: "failed", PreAnnotationTask.error_message: msg},
-                synchronize_session=False,
-            )
+            .all()
         )
+        pre_alive = alive_keys(p.task_id for p in pre_rows)
+        n_pre = 0
+        for p in pre_rows:
+            if p.task_id not in pre_alive:
+                p.status = "failed"
+                p.error_message = msg
+                n_pre += 1
+
         db.commit()
         if n_train or n_rknn or n_pre:
             logging.info(

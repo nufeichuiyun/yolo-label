@@ -11,6 +11,7 @@ from app.celery_app import celery_app
 from app.models import TrainingTask, Project
 from app.services.training_service import prepare_dataset, collect_calibration_images
 from app.services.training_archive_service import create_training_archive
+from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
 
 try:
@@ -108,6 +109,10 @@ def train_model_task(
             workers = _resolve_workers()
             batch_resolved = _resolve_batch(batch, has_gpu)
             print(f"[training] 使用子进程隔离训练，device={device}, workers={workers}, batch={batch_resolved}", flush=True)
+
+            # 启动子进程前先写一次心跳：父任务在 subprocess.run() 期间被完全阻塞、无法应答
+            # Celery inspect，靠该心跳让后端启动清扫识别"本任务正在运行"，子进程随后持续续期。
+            mark_alive(task_id)
 
             # 通过子进程运行训练，子进程退出时所有内存被 OS  reclaim；捕获输出以便失败时展示具体错误
             proc = subprocess.run(

@@ -27,6 +27,11 @@ def run_training(
     try:
         from ultralytics import YOLO
 
+        from app.task_heartbeat import mark_alive
+
+        # 子进程一启动即写首个心跳，覆盖"父任务已置 running、子进程仍在加载"的空窗
+        mark_alive(task_id)
+
         # 若 base_model 为文件名（非绝对路径）且 MODEL_DIR 中已存在，优先使用本地文件，避免无网络时下载失败
         model_path = base_model
         if not os.path.isabs(base_model):
@@ -72,6 +77,7 @@ def run_training(
                 total = getattr(trainer, "epochs", epochs)
                 progress = int(5 + 90 * current / total)
                 _update_progress(current, progress)
+                mark_alive(task_id)  # 每个 epoch 续期心跳
 
                 metrics_dict = {"epoch": current, "progress": progress}
                 tloss = getattr(trainer, "tloss", None)
@@ -117,6 +123,7 @@ def run_training(
                 batch_i = getattr(trainer, "batch_i", 0)
                 nb = max(getattr(trainer, "nb", 1), 1)
                 if batch_i % 50 == 0 or batch_i >= nb - 1:
+                    mark_alive(task_id)  # 每 ~50 批次续期心跳，覆盖单 epoch 较长的情况
                     batch_progress = (epoch * nb + batch_i + 1) / (epochs * nb) if epochs * nb > 0 else 0
                     progress = int(5 + 90 * batch_progress)
                     if progress > _last_batch_progress[0]:

@@ -13,6 +13,7 @@ import subprocess
 
 from app.celery_app import celery_app
 from app.models import TrainingTask
+from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
 
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
@@ -47,6 +48,9 @@ def convert_to_rknn_task(self, training_task_id: int):
     task.rknn_status = "converting"
     task.rknn_error = None
     db.commit()
+    # 转换是单次阻塞调用、无进度循环，故一次性写较长 TTL 的心跳覆盖整个转换过程，
+    # 供后端启动清扫识别"正在转换"（键名加 rknn: 前缀，与训练/预标注的 task_id 区分）
+    mark_alive(f"rknn:{training_task_id}", ttl=3600)
 
     try:
         if not task.output_model_path:

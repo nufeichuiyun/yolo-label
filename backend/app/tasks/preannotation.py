@@ -10,6 +10,7 @@ from app.celery_app import celery_app
 from app.database import SessionLocal
 from app.models import PreAnnotationTask, Image, Category, Annotation, Project, Model
 from app.services.yolo_service import create_yolo_service
+from app.task_heartbeat import mark_alive
 from sqlalchemy.orm import Session
 
 # 直接导入torch用于GPU显存检测（容器内已安装）
@@ -66,7 +67,8 @@ def preannotate_project_task(
         
         task.status = "running"
         db.commit()
-        
+        mark_alive(task_id)  # 任务开始即写心跳，供后端启动清扫识别"正在运行"
+
         # 获取项目信息
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
@@ -282,6 +284,7 @@ def preannotate_project_task(
                         task.progress = progress
                         task.processed_images = current_idx
                         db.commit()
+                        mark_alive(task_id)  # 处理过程中持续续期心跳
                         
                         # 更新Celery任务状态
                         self.update_state(
