@@ -74,6 +74,23 @@ def train_model_task(
         if not task:
             raise ValueError(f"训练任务不存在: {task_id}")
 
+        # 幂等防护：Redis broker 在断连/重连、worker 重启等情况下可能重投递同一任务消息
+        # （solo pool 下 acks_late=False 实际为"完成后才确认"，消息整轮挂在 unacked，broker
+        # 一抖动即被恢复成重复副本，visibility_timeout 管不到这种重连恢复）。任务产出模型后，
+        # output_model_path 会被置上；若它已存在且模型文件在盘，说明是重复投递，直接返回，避免重训。
+        if task.output_model_path and os.path.exists(os.path.join(MODEL_DIR, task.output_model_path)):
+            print(f"[training] 检测到模型已产出({task.output_model_path})，判定为重复投递，跳过重训", flush=True)
+            if task.status != "completed":
+                task.status = "completed"
+                task.progress = 100
+                db.commit()
+            return {
+                "message": "训练已完成（跳过重复执行）",
+                "train_images": task.train_images,
+                "val_images": task.val_images,
+                "output_model_path": task.output_model_path,
+            }
+
         task.status = "running"
         task.progress = 0
         db.commit()
