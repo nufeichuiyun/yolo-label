@@ -10,6 +10,11 @@ export interface LoginResponse {
   token_type: string
 }
 
+export interface ChangePasswordRequest {
+  old_password: string
+  new_password: string
+}
+
 export interface User {
   id: number
   username: string
@@ -28,5 +33,9 @@ export const authApi = {
   getCurrentUser: async (): Promise<User> => {
     const response = await apiClient.get('/api/auth/me')
     return response.data
+  },
+
+  changePassword: async (data: ChangePasswordRequest): Promise<void> => {
+    await apiClient.post('/api/auth/change-password', data)
   },
 }

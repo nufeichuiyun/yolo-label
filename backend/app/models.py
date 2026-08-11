@@ -1,7 +1,7 @@
 """
 数据库模型定义
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum, Boolean, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -31,6 +31,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
     role = Column(Enum(UserRole, native_enum=False, length=50, values_callable=lambda obj: [e.value for e in obj]), default=UserRole.ANNOTATOR, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -162,11 +163,15 @@ class Model(Base):
 class PreAnnotationTask(Base):
     """预标注任务模型"""
     __tablename__ = "pre_annotation_tasks"
+    __table_args__ = (
+        UniqueConstraint("task_id"),
+        Index("ix_pre_annotation_tasks_task_id", "task_id", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     model_id = Column(Integer, ForeignKey("models.id"), nullable=False)
-    task_id = Column(String(255), unique=True, index=True)  # Celery任务ID
+    task_id = Column(String(255), nullable=False)  # Celery任务ID
     status = Column(String(50), default="pending")  # pending, running, completed, failed
     progress = Column(Integer, default=0)  # 进度百分比 0-100
     total_images = Column(Integer, default=0)  # 总图片数
@@ -186,11 +191,15 @@ class PreAnnotationTask(Base):
 class TrainingTask(Base):
     """训练任务模型"""
     __tablename__ = "training_tasks"
+    __table_args__ = (
+        UniqueConstraint("task_id"),
+        Index("ix_training_tasks_task_id", "task_id", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     base_model = Column(String(100), nullable=False)  # yolo11n.pt / yolo11n-seg.pt 等
-    task_id = Column(String(255), unique=True, index=True)  # Celery任务ID
+    task_id = Column(String(255), nullable=False)  # Celery任务ID
     status = Column(String(50), default="pending")  # pending, running, completed, failed
     progress = Column(Integer, default=0)  # 进度百分比 0-100
     epochs = Column(Integer, default=100)  # 总epoch数

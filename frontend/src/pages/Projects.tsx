@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { projectsApi, Project } from '../api/projects'
 import { exportApi } from '../api/export'
 import ProjectForm from '../components/ProjectForm'
+import ChangePasswordModal from '../components/ChangePasswordModal'
 import { useAuth } from '../contexts/AuthContext'
 import './Projects.css'
 
@@ -19,6 +20,7 @@ export default function Projects() {
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState<number | null>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -194,6 +196,7 @@ export default function Projects() {
             </Button>
           )}
           <span>欢迎，{user?.username}</span>
+          <Button onClick={() => setChangePasswordVisible(true)}>修改密码</Button>
           <Button onClick={logout}>退出</Button>
         </Space>
       </Header>
@@ -227,6 +230,11 @@ export default function Projects() {
           project={editingProject}
           onCancel={() => setModalVisible(false)}
           onSubmit={handleFormSubmit}
+        />
+
+        <ChangePasswordModal
+          open={changePasswordVisible}
+          onCancel={() => setChangePasswordVisible(false)}
         />
 
         <Modal

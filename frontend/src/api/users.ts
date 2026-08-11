@@ -13,6 +13,10 @@ export interface UserListResponse {
   total: number
 }
 
+export interface ResetPasswordRequest {
+  new_password: string
+}
+
 export const usersApi = {
   list: async (skip = 0, limit = 100): Promise<UserListResponse> => {
     const response = await apiClient.get('/api/users', {
@@ -33,5 +37,9 @@ export const usersApi = {
   
   delete: async (id: number): Promise<void> => {
     await apiClient.delete(`/api/users/${id}`)
+  },
+
+  resetPassword: async (id: number, data: ResetPasswordRequest): Promise<void> => {
+    await apiClient.put(`/api/users/${id}/password`, data)
   },
 }

@@ -1,13 +1,22 @@
 """
 Pydantic模型（API请求/响应模型）
 """
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models import UserRole, AnnotationType
 
 
 # 用户相关
+def validate_new_password(password: str) -> str:
+    """校验 bcrypt 可安全处理的新密码。"""
+    if len(password) < 6:
+        raise ValueError("密码至少需要6个字符")
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("密码的 UTF-8 编码不能超过72字节")
+    return password
+
+
 class UserBase(BaseModel):
     username: str
     email: EmailStr
@@ -16,6 +25,11 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     role: Optional[UserRole] = UserRole.ANNOTATOR
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, password: str) -> str:
+        return validate_new_password(password)
 
 
 class UserResponse(UserBase):
@@ -41,6 +55,25 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, password: str) -> str:
+        return validate_new_password(password)
+
+
+class PasswordResetRequest(BaseModel):
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, password: str) -> str:
+        return validate_new_password(password)
 
 
 # 项目相关

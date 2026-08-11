@@ -6,6 +6,7 @@ import { tasksApi, Task } from '../api/tasks'
 import { projectsApi, Project } from '../api/projects'
 import { statsApi, TaskStats } from '../api/stats'
 import { useAuth } from '../contexts/AuthContext'
+import ChangePasswordModal from '../components/ChangePasswordModal'
 import './Tasks.css'
 
 const { Header, Content } = Layout
@@ -18,6 +19,7 @@ interface TaskWithProject extends Task {
 export default function Tasks() {
   const [tasks, setTasks] = useState<TaskWithProject[]>([])
   const [loading, setLoading] = useState(false)
+  const [changePasswordVisible, setChangePasswordVisible] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -158,6 +160,7 @@ export default function Tasks() {
             </a>
           )}
           <span>欢迎，{user?.username}</span>
+          <a onClick={() => setChangePasswordVisible(true)} style={{ color: 'white' }}>修改密码</a>
           <a onClick={logout} style={{ color: 'white' }}>退出</a>
         </Space>
       </Header>
@@ -171,6 +174,10 @@ export default function Tasks() {
             pagination={{ pageSize: 10 }}
           />
         </Card>
+        <ChangePasswordModal
+          open={changePasswordVisible}
+          onCancel={() => setChangePasswordVisible(false)}
+        />
       </Content>
     </Layout>
   )

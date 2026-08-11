@@ -2,10 +2,11 @@
 认证相关路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import LoginRequest, Token, UserResponse, UserCreate
+from app.schemas import LoginRequest, PasswordChangeRequest, Token, UserResponse, UserCreate
 from app.auth import verify_password, get_password_hash, create_access_token, get_current_user, require_super_admin
 from datetime import timedelta
 
@@ -15,45 +16,65 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 @router.post("/login", response_model=Token)
 async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     """用户登录"""
-    try:
-        user = db.query(User).filter(User.username == login_data.username).first()
-        if not user or not verify_password(login_data.password, user.hashed_password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户名或密码错误",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        if not user.is_active:
-            raise HTTPException(status_code=400, detail="用户已被禁用")
-        
-        # 兼容旧的角色值：如果角色是 'admin'，自动更新为 'super_admin'
-        try:
-            role_value = user.role.value if hasattr(user.role, 'value') else str(user.role)
-            if role_value == 'admin':
-                from app.models import UserRole
-                user.role = UserRole.SUPER_ADMIN
-                db.commit()
-                db.refresh(user)
-        except Exception:
-            # 如果角色值无法读取，尝试直接更新数据库
-            try:
-                from app.models import UserRole
-                from sqlalchemy import text
-                db.execute(text("UPDATE users SET role = 'super_admin' WHERE id = :user_id"), {"user_id": user.id})
-                db.commit()
-                db.refresh(user)
-            except Exception:
-                pass  # 如果更新失败，继续执行
-        
-        access_token_expires = timedelta(minutes=3 * 24 * 60)  # 3天
-        access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+    user = db.query(User).filter(User.username == login_data.username).first()
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        return {"access_token": access_token, "token_type": "bearer"}
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="用户已被禁用")
+
+    # 兼容旧的角色值：如果角色是 'admin'，自动更新为 'super_admin'
+    try:
+        role_value = user.role.value if hasattr(user.role, 'value') else str(user.role)
+        if role_value == 'admin':
+            from app.models import UserRole
+            user.role = UserRole.SUPER_ADMIN
+            db.commit()
+            db.refresh(user)
+    except Exception:
+        # 如果角色值无法读取，尝试直接更新数据库
+        try:
+            from app.models import UserRole
+            from sqlalchemy import text
+            db.execute(text("UPDATE users SET role = 'super_admin' WHERE id = :user_id"), {"user_id": user.id})
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            pass  # 如果更新失败，继续执行
+
+    access_token_expires = timedelta(minutes=3 * 24 * 60)  # 3天
+    access_token = create_access_token(
+        data={"sub": user.username, "token_version": user.token_version},
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/change-password")
+async def change_password(
+    password_data: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """修改当前用户密码。"""
+    if not verify_password(password_data.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="旧密码错误")
+    if verify_password(password_data.new_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="新密码不能与旧密码相同")
+
+    db.execute(
+        update(User)
+        .where(User.id == current_user.id)
+        .values(
+            hashed_password=get_password_hash(password_data.new_password),
+            token_version=User.token_version + 1
+        )
+    )
+    db.commit()
+    return {"message": "密码修改成功，请重新登录"}
 
 
 @router.post("/register", response_model=UserResponse)

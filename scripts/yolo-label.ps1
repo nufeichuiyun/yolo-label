@@ -62,7 +62,7 @@ function Show-Menu {
     Write-Host "   5. 重启服务"
     Write-Host "   6. 打开浏览器"
     Write-Host "   7. 重建镜像（代码或依赖变动后用）"
-    Write-Host "   8. 初始化数据库 / 重置 admin 密码"
+    Write-Host "   8. 初始化数据库（已存在的 admin 不会修改）"
     Write-Host "   0. 退出"
     Write-Host "==========================================" -ForegroundColor Cyan
     $gpu = if ($env:GPU -eq "0") { "CPU-only" } else { "GPU" }
