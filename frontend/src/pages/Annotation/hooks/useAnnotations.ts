@@ -7,11 +7,10 @@ import { Image } from '../../../api/images'
 import { rectToYOLO, polygonToYOLO, getImageBounds, yoloToCanvas } from '../utils/coordinate'
 import { clampYOLO, clipRectToImageBounds, clipPolygonToImageBounds } from '../utils/clipping'
 import { createAnnotationRect, createAnnotationPolygon } from '../utils/fabricObjects'
-import type { ImageBounds, YOLORect, YOLOPolygon } from '../types'
+import type { YOLORect, YOLOPolygon } from '../types'
 
 interface UseAnnotationsOptions {
   canvasRef: React.MutableRefObject<fabric.Canvas | null>
-  imageBoundsRef: React.MutableRefObject<ImageBounds | null>
   imageRef: React.MutableRefObject<Image | null>
   imageIdRef: React.MutableRefObject<string | undefined>  // 闭包安全的 imageId
   categoriesRef: React.MutableRefObject<Category[]>
@@ -41,7 +40,7 @@ interface UseAnnotationsReturn {
 
 export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsReturn {
   const {
-    canvasRef, imageBoundsRef, imageRef, imageIdRef, categoriesRef, projectRef,
+    canvasRef, imageRef, imageIdRef, categoriesRef, projectRef,
     selectedVertexIndexRef, saveCurrentAnnotationsRef, createPolygonControls, onStatsUpdate,
   } = options
 
@@ -170,9 +169,9 @@ export function useAnnotations(options: UseAnnotationsOptions): UseAnnotationsRe
     canvas: fabric.Canvas,
     annotations: any[],
     categories: Category[],
-    originalImgWidth: number,
-    originalImgHeight: number,
-    scale: number,
+    _originalImgWidth: number,
+    _originalImgHeight: number,
+    _scale: number,
     annotationType: string = 'detection'
   ) => {
     // 清除已保存的标注对象

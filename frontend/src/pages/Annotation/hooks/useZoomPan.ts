@@ -20,22 +20,6 @@ export function useZoomPan(options: UseZoomPanOptions): UseZoomPanReturn {
   const isPanningRef = useRef(false)
   const lastPanPointRef = useRef<{ x: number; y: number } | null>(null)
 
-  const isImageFullyVisible = useCallback((canvas: fabric.Canvas): boolean => {
-    const bgImage = canvas.backgroundImage as fabric.Image
-    if (!bgImage || !bgImage.width || !bgImage.height) return true
-
-    const zoom = canvas.getZoom()
-    const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0]
-    const imgW = bgImage.width * (bgImage.scaleX || 1) * zoom
-    const imgH = bgImage.height * (bgImage.scaleY || 1) * zoom
-    const imgLeft = (bgImage.left || 0) * zoom + vpt[4]
-    const imgTop = (bgImage.top || 0) * zoom + vpt[5]
-    const canvasW = canvas.getWidth()
-    const canvasH = canvas.getHeight()
-
-    return imgLeft >= 0 && imgTop >= 0 && imgLeft + imgW <= canvasW && imgTop + imgH <= canvasH
-  }, [])
-
   /**
    * 约束图像位置，防止图像完全移出画布。
    * 直接复制原文件 3255-3299 逻辑。注意：bgImage.left 不乘以 zoom，

@@ -1,7 +1,9 @@
 import apiClient from './client'
+import type { AxiosResponse } from 'axios'
 
-function extractFilename(response: { headers: Record<string, string> }, defaultName: string): string {
-  const contentDisposition = response.headers['content-disposition'] || response.headers['Content-Disposition'] || ''
+function extractFilename(response: Pick<AxiosResponse<Blob>, 'headers'>, defaultName: string): string {
+  const header = response.headers['content-disposition'] || response.headers['Content-Disposition']
+  const contentDisposition = typeof header === 'string' ? header : ''
   if (contentDisposition) {
     const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
     if (filenameMatch && filenameMatch[1]) {

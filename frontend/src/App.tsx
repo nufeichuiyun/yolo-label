@@ -63,7 +63,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/models"
+        path="/projects/:projectId/models"
         element={
           <ProtectedRoute>
             <Models />

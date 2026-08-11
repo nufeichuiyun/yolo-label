@@ -188,7 +188,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
           const anchorLocalY = anchorPoint.y - oldPathOffset.y
           const oldTransformMatrix = polygon.calcTransformMatrix()
           const anchorAbsolute = fabric.util.transformPoint(
-            { x: anchorLocalX, y: anchorLocalY },
+            new fabric.Point(anchorLocalX, anchorLocalY),
             oldTransformMatrix
           )
 
@@ -206,7 +206,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
           const newAnchorLocalY = anchorPoint.y - newPathOffset.y
           const newTransformMatrix = polygon.calcTransformMatrix()
           const newAnchorAbsolute = fabric.util.transformPoint(
-            { x: newAnchorLocalX, y: newAnchorLocalY },
+            new fabric.Point(newAnchorLocalX, newAnchorLocalY),
             newTransformMatrix
           )
           const deltaX = anchorAbsolute.x - newAnchorAbsolute.x
@@ -244,7 +244,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       control.positionHandler = function(_dim: any, _finalMatrix: any, fabricObject: fabric.Object) {
         const poly = fabricObject as fabric.Polygon
         const pt = poly.points?.[index]
-        if (!pt) return { x: 0, y: 0 }
+        if (!pt) return new fabric.Point(0, 0)
         const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
         const pointLocalX = pt.x - pathOffset.x
         const pointLocalY = pt.y - pathOffset.y
@@ -254,7 +254,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
           ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
           : objMatrix
-        return fabric.util.transformPoint({ x: pointLocalX, y: pointLocalY }, screenMatrix)
+        return fabric.util.transformPoint(new fabric.Point(pointLocalX, pointLocalY), screenMatrix)
       }
 
       polygon.controls[controlName] = control
@@ -293,7 +293,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
           const pts = poly.points || []
           const pA = pts[index]
           const pB = pts[nextIndex]
-          if (!pA || !pB) return { x: 0, y: 0 }
+          if (!pA || !pB) return new fabric.Point(0, 0)
           const pathOffset = (poly as any).pathOffset || { x: 0, y: 0 }
           const midX = (pA.x + pB.x) / 2 - pathOffset.x
           const midY = (pA.y + pB.y) / 2 - pathOffset.y
@@ -303,7 +303,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
           const screenMatrix = (vpt && vpt.length >= 6 && fabric.util.multiplyTransformMatrices)
             ? fabric.util.multiplyTransformMatrices(vpt, objMatrix)
             : objMatrix
-          return fabric.util.transformPoint({ x: midX, y: midY }, screenMatrix)
+          return fabric.util.transformPoint(new fabric.Point(midX, midY), screenMatrix)
         }
 
         polygon.controls[controlName] = control
@@ -319,7 +319,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       const canvasPts = pts.map((p: any) => {
         const px = p.x - po.x
         const py = p.y - po.y
-        return fabric.util.transformPoint({ x: px, y: py }, tm)
+        return fabric.util.transformPoint(new fabric.Point(px, py), tm)
       })
       return isPointInPolygon(point, canvasPts)
     }
@@ -348,7 +348,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         cornerStrokeColor: '#ffffff',
         cornerSize: 12,
         transparentCorners: false,
-      })
+      } as any)
       ;(activeObject as any)._baseStrokeWidth = base
       // 隐藏旋转锚点
       activeObject.controls = {
@@ -436,7 +436,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         rect.set({
           strokeWidth: Math.max(MIN_STROKE_WIDTH, base / obj.canvas.getZoom()),
           strokeUniform: true,
-        }, false)
+        })
         rect.setCoords()
       }
     })
@@ -613,7 +613,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       const pointLocalX = point.x - pathOffset.x
       const pointLocalY = point.y - pathOffset.y
       return fabric.util.transformPoint(
-        { x: pointLocalX, y: pointLocalY },
+        new fabric.Point(pointLocalX, pointLocalY),
         transformMatrix
       )
     })
@@ -653,8 +653,11 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
     if (pointsChanged) {
       const invertedMatrix = fabric.util.invertTransform(transformMatrix)
       const clippedLocalPoints = clippedCanvasPoints.map(canvasPoint => {
-        const localPoint = fabric.util.transformPoint(canvasPoint, invertedMatrix)
-        return { x: localPoint.x + pathOffset.x, y: localPoint.y + pathOffset.y }
+        const localPoint = fabric.util.transformPoint(
+          new fabric.Point(canvasPoint.x, canvasPoint.y),
+          invertedMatrix
+        )
+        return new fabric.Point(localPoint.x + pathOffset.x, localPoint.y + pathOffset.y)
       })
 
       polygon.set({ points: clippedLocalPoints })
@@ -668,7 +671,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       const newTransformMatrix = polygon.calcTransformMatrix()
       const anchorLocal = clippedLocalPoints[0]
       const actualPos = fabric.util.transformPoint(
-        { x: anchorLocal.x - newPathOffset.x, y: anchorLocal.y - newPathOffset.y },
+        new fabric.Point(anchorLocal.x - newPathOffset.x, anchorLocal.y - newPathOffset.y),
         newTransformMatrix
       )
       const expectedPos = clippedCanvasPoints[0]
@@ -715,8 +718,8 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         const nextI = (i + 1) % points.length
         const p1 = points[i]
         const p2 = points[nextI]
-        const local1 = { x: p1.x - pathOffset.x, y: p1.y - pathOffset.y }
-        const local2 = { x: p2.x - pathOffset.x, y: p2.y - pathOffset.y }
+        const local1 = new fabric.Point(p1.x - pathOffset.x, p1.y - pathOffset.y)
+        const local2 = new fabric.Point(p2.x - pathOffset.x, p2.y - pathOffset.y)
         const canvas1 = fabric.util.transformPoint(local1, transformMatrix)
         const canvas2 = fabric.util.transformPoint(local2, transformMatrix)
         const distToP1 = Math.sqrt((pointer.x - canvas1.x) ** 2 + (pointer.y - canvas1.y) ** 2)
@@ -743,7 +746,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         const p = points[i]
         const localX = p.x - pathOffset.x
         const localY = p.y - pathOffset.y
-        const canvasPt = fabric.util.transformPoint({ x: localX, y: localY }, transformMatrix)
+        const canvasPt = fabric.util.transformPoint(new fabric.Point(localX, localY), transformMatrix)
         const dx = pointer.x - canvasPt.x
         const dy = pointer.y - canvasPt.y
         if (Math.sqrt(dx * dx + dy * dy) <= vertexHitRadius) {
@@ -763,16 +766,16 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       const anchorLocalX = anchorPoint.x - oldPathOffset.x
       const anchorLocalY = anchorPoint.y - oldPathOffset.y
       const anchorAbsolute = fabric.util.transformPoint(
-        { x: anchorLocalX, y: anchorLocalY },
+        new fabric.Point(anchorLocalX, anchorLocalY),
         transformMatrix
       )
 
       const invMatrix = fabric.util.invertTransform(transformMatrix)
-      const localPoint = fabric.util.transformPoint(pointer as any, invMatrix)
+      const localPoint = fabric.util.transformPoint(new fabric.Point(pointer.x, pointer.y), invMatrix)
       const newX = localPoint.x + pathOffset.x
       const newY = localPoint.y + pathOffset.y
       const polygonPointsArray = [...(polygon.points || [])]
-      polygonPointsArray.splice(hitEdge + 1, 0, { x: newX, y: newY })
+      polygonPointsArray.splice(hitEdge + 1, 0, new fabric.Point(newX, newY))
 
       polygon.set({ points: polygonPointsArray })
       polygon._setPositionDimensions({})
@@ -784,7 +787,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
       const newAnchorLocalY = anchorPoint.y - newPathOffset.y
       const newTransformMatrix = polygon.calcTransformMatrix()
       const newAnchorAbsolute = fabric.util.transformPoint(
-        { x: newAnchorLocalX, y: newAnchorLocalY },
+        new fabric.Point(newAnchorLocalX, newAnchorLocalY),
         newTransformMatrix
       )
       const deltaX = anchorAbsolute.x - newAnchorAbsolute.x

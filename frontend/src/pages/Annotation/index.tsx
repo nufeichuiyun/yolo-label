@@ -156,7 +156,6 @@ export default function Annotation() {
     canvasRef: fabricCanvasRef,
     setCanvasSize: useCallback(() => {}, []),  // canvas 尺寸在 useEffect 中直接管理
     onImageLoaded: useCallback(() => {}, []),
-    onBeforeSwitch: useCallback(() => {}, []),
     getApiBaseUrl,
   })
 
@@ -165,7 +164,6 @@ export default function Annotation() {
   // ============================================================
   const annotationsMgr = useAnnotations({
     canvasRef: fabricCanvasRef,
-    imageBoundsRef: imageLoader.imageBoundsRef,
     imageRef,
     imageIdRef,
     categoriesRef,
@@ -201,16 +199,6 @@ export default function Annotation() {
     setPreviewImages(images.slice(startIndex, endIndex))
   }, [])
 
-  const loadImage = useCallback(async () => {
-    if (!imageId) return
-    try {
-      const data = await imagesApi.get(Number(imageId))
-      setImage(data)
-    } catch (error) {
-      message.error('加载图片失败')
-    }
-  }, [imageId])
-
   const loadCategories = useCallback(async () => {
     if (!projectId) return
     try {
@@ -224,18 +212,6 @@ export default function Annotation() {
       message.error('加载类别失败')
     }
   }, [projectId])
-
-  const loadAnnotations = useCallback(async () => {
-    if (!imageId) return
-    try {
-      const data = await annotationsApi.getImageAnnotations(Number(imageId))
-      setAnnotations(data)
-      annotationsMgr.annotationsRef.current = data
-    } catch (error) {
-      setAnnotations([])
-      annotationsMgr.annotationsRef.current = []
-    }
-  }, [imageId, annotationsMgr.annotationsRef])
 
   const loadAllImages = useCallback(async () => {
     if (!projectId) return
@@ -269,28 +245,6 @@ export default function Annotation() {
       console.error('加载统计信息失败:', error)
     }
   }, [projectId])
-
-  const loadCurrentTask = useCallback(async () => {
-    if (!imageId) return
-    try {
-      const task = await tasksApi.getImageTask(Number(imageId))
-      setCurrentTask(task)
-      if (task) {
-        try {
-          const stats = await statsApi.getTaskStats(task.id)
-          setTaskStats(stats)
-        } catch (error) {
-          console.error('加载任务包统计信息失败:', error)
-        }
-      } else {
-        setTaskStats(null)
-      }
-    } catch (error) {
-      console.error('加载任务包信息失败:', error)
-      setCurrentTask(null)
-      setTaskStats(null)
-    }
-  }, [imageId])
 
   const loadProject = useCallback(async () => {
     if (!projectId) return
@@ -563,7 +517,7 @@ export default function Annotation() {
           ;(obj as any)._baseStrokeWidth = base
         } else if (obj.type === 'polygon') {
           const base = (obj as any)._baseStrokeWidth ?? 3
-          obj.set('strokeWidth', Math.max(0.5, base / zoom), false)
+            obj.set('strokeWidth', Math.max(0.5, base / zoom))
           ;(obj as any)._baseStrokeWidth = base
         }
       })
@@ -1118,7 +1072,7 @@ export default function Annotation() {
               const anchorLocalX = anchorPoint.x - oldPathOffset.x
               const anchorLocalY = anchorPoint.y - oldPathOffset.y
               const anchorAbsolute = fabric.util.transformPoint(
-                { x: anchorLocalX, y: anchorLocalY },
+                new fabric.Point(anchorLocalX, anchorLocalY),
                 transformMatrix
               )
               const newPoints = points.filter((_: any, i: number) => i !== idx)
@@ -1131,7 +1085,7 @@ export default function Annotation() {
               const newAnchorLocalY = anchorPoint.y - newPathOffset.y
               const newTransformMatrix = polygon.calcTransformMatrix()
               const newAnchorAbsolute = fabric.util.transformPoint(
-                { x: newAnchorLocalX, y: newAnchorLocalY },
+                new fabric.Point(newAnchorLocalX, newAnchorLocalY),
                 newTransformMatrix
               )
               const deltaX = anchorAbsolute.x - newAnchorAbsolute.x

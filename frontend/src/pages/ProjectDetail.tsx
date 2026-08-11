@@ -56,7 +56,7 @@ export default function ProjectDetail() {
   const [selectedClasses, setSelectedClasses] = useState<string[]>([])
   const [loadingClasses, setLoadingClasses] = useState(false)
   const [currentTask, setCurrentTask] = useState<PreAnnotationTask | null>(null)
-  const [taskPollingInterval, setTaskPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [taskPollingInterval, setTaskPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
   const [taskHistory, setTaskHistory] = useState<PreAnnotationTask[]>([])
   const [taskHistoryVisible, setTaskHistoryVisible] = useState(false)
   
@@ -81,7 +81,7 @@ export default function ProjectDetail() {
   const [trainingHistory, setTrainingHistory] = useState<TrainingTask[]>([])
   const [currentTrainingTask, setCurrentTrainingTask] = useState<TrainingTask | null>(null)
   const [trainingFloatVisible, setTrainingFloatVisible] = useState(true)  // 训练进度浮层是否展开（关闭仅最小化，训练继续）
-  const [trainingPollingInterval, setTrainingPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [trainingPollingInterval, setTrainingPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
   const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
   const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
   const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16, train_split: 0.8, convert_to_rknn: true })
@@ -709,21 +709,6 @@ export default function ProjectDetail() {
     }
   }
 
-  const handleUpload = async (files: File[]) => {
-    try {
-      await imagesApi.upload(Number(projectId), files)
-      message.success(`成功上传 ${files.length} 张图片`)
-      loadImages()
-      loadStats()
-      // 如果项目设置了自动创建任务包，上传后需要刷新任务包列表
-      if (user?.role === 'super_admin' || user?.role === 'project_admin') {
-        loadTasks()
-      }
-    } catch (error: any) {
-      message.error(error.response?.data?.detail || '上传失败')
-    }
-  }
-
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1133,7 +1118,7 @@ export default function ProjectDetail() {
                       const currentFileList = info.fileList || fileList
                       const filesToUpload = currentFileList
                         .map(f => f.originFileObj)
-                        .filter((file): file is File => {
+                        .filter((file): file is NonNullable<typeof file> => {
                           if (!(file instanceof File)) {
                             return false
                           }
@@ -1630,7 +1615,7 @@ export default function ProjectDetail() {
                         {(task.status === 'running' || task.status === 'completed') && (
                           <Progress
                             percent={task.progress}
-                            status={task.status === 'failed' ? 'exception' : 'success'}
+                            status="success"
                             size="small"
                             format={() => `Epoch ${task.current_epoch}/${task.epochs}`}
                           />
@@ -1856,7 +1841,7 @@ export default function ProjectDetail() {
                           <div>
                             <Progress
                               percent={task.progress}
-                              status={task.status === 'failed' ? 'exception' : 'success'}
+                              status="success"
                               size="small"
                               format={() => `${task.processed_images}/${task.total_images}`}
                             />

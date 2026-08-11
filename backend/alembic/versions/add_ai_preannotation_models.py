@@ -1,7 +1,7 @@
 """add ai preannotation models
 
 Revision ID: add_ai_preannotation
-Revises: 
+Revises: create_core_schema
 Create Date: 2026-01-30 12:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'add_ai_preannotation'
-down_revision = None  # 根据实际情况修改
+down_revision = 'create_core_schema'
 branch_labels = None
 depends_on = None
 

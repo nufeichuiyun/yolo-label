@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Layout, Card, Button, Table, Upload, message, Space, Modal, Input, Popconfirm, Tag } from 'antd'
-import { UploadOutlined, ArrowLeftOutlined, DeleteOutlined, CheckOutlined } from '@ant-design/icons'
+import { UploadOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { modelsApi, Model } from '../api/models'
 import './Models.css'
 
@@ -9,6 +9,7 @@ const { Header, Content } = Layout
 
 export default function Models() {
   const navigate = useNavigate()
+  const { projectId } = useParams<{ projectId: string }>()
   const [models, setModels] = useState<Model[]>([])
   const [loading, setLoading] = useState(false)
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
@@ -22,9 +23,10 @@ export default function Models() {
   }, [])
 
   const loadModels = async () => {
+    if (!projectId) return
     setLoading(true)
     try {
-      const data = await modelsApi.list()
+      const data = await modelsApi.list(Number(projectId))
       setModels(data.items)
     } catch (error) {
       message.error('加载模型列表失败')
@@ -45,7 +47,7 @@ export default function Models() {
 
     setUploading(true)
     try {
-      await modelsApi.upload(uploadFile, modelName.trim(), modelDescription.trim())
+      await modelsApi.upload(Number(projectId), uploadFile, modelName.trim(), modelDescription.trim())
       message.success('模型上传成功')
       setUploadModalVisible(false)
       setModelName('')

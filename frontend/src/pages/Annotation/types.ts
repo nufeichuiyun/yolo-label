@@ -24,7 +24,7 @@ export interface RectBounds {
 
 // Fabric.js v5 的 pathOffset 未导出，扩展接口
 export interface FabricPolygonExt extends fabric.Polygon {
-  pathOffset: Point
+  pathOffset: fabric.Point
   _baseStrokeWidth?: number
 }
 

@@ -1,12 +1,12 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
 # 复制package文件
 COPY package*.json ./
 
-# 安装依赖
-RUN npm install
+# 按锁文件安装依赖，确保本地与服务器版本一致
+RUN npm ci
 
 # 复制应用代码
 COPY . .

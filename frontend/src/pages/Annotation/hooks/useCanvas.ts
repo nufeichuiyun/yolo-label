@@ -78,7 +78,7 @@ export function useCanvas({ canvasRef }: UseCanvasOptions): UseCanvasReturn {
           if (obj.type === 'rect') {
             obj.set({ strokeWidth: newStrokeWidth, strokeUniform: true, objectCaching: false } as any, false)
           } else {
-            obj.set('strokeWidth', newStrokeWidth, false)
+            obj.set('strokeWidth', newStrokeWidth)
           }
           ;(obj as any)._baseStrokeWidth = base
         }

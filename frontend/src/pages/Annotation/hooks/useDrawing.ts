@@ -243,7 +243,7 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
           const vpt = canvas.viewportTransform
           if (vpt) {
             const invertedVpt = fabric.util.invertTransform(vpt)
-            const transformed = fabric.util.transformPoint({ x, y }, invertedVpt)
+            const transformed = fabric.util.transformPoint(new fabric.Point(x, y), invertedVpt)
             pointerX = transformed.x
             pointerY = transformed.y
           } else {
@@ -920,7 +920,7 @@ export function useDrawing(options: UseDrawingOptions): UseDrawingReturn {
           return result
         }
       }
-      rect.set({ uniformScaling: false, lockUniScaling: false, lockRotation: true })
+      rect.set({ uniformScaling: false, lockUniScaling: false, lockRotation: true } as any)
       ;(rect as any).categoryId = currentSelectedCategory
       canvas.add(rect)
       rectRef.current = rect

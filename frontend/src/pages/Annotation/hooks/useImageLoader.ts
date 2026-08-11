@@ -10,7 +10,6 @@ interface UseImageLoaderOptions {
   canvasRef: React.MutableRefObject<fabric.Canvas | null>
   setCanvasSize: (cssWidth: number, cssHeight: number) => void
   onImageLoaded: (bounds: ImageBounds, originalWidth: number, originalHeight: number, scale: number) => void
-  onBeforeSwitch: () => void       // 图片切换前调用（保存、reset 等）
   getApiBaseUrl: () => string
 }
 
@@ -29,7 +28,7 @@ function encodeImagePath(filepath: string, apiBaseUrl: string): string {
 }
 
 export function useImageLoader(options: UseImageLoaderOptions): UseImageLoaderReturn {
-  const { canvasRef, setCanvasSize, onImageLoaded, onBeforeSwitch, getApiBaseUrl } = options
+  const { canvasRef, setCanvasSize, onImageLoaded, getApiBaseUrl } = options
 
   const imageBoundsRef = useRef<ImageBounds | null>(null)
   const isLoadingRef = useRef(false)
@@ -136,7 +135,7 @@ export function useImageLoader(options: UseImageLoaderOptions): UseImageLoaderRe
 
         const bounds = getImageBounds(img)
         imageBoundsRef.current = bounds
-        onImageLoaded(bounds, img.width, img.height, scale)
+        onImageLoaded(bounds, img.width!, img.height!, scale)
         isLoadingRef.current = false
       }, {
         left: marginX,
