@@ -42,7 +42,9 @@ RUN cd install_rknn && \
 # 国内镜像在构建高并发下抓取大索引页(ultralytics/torch 等)偶发 SSL UNEXPECTED_EOF，
 # 故追加官方源兜底 + 提高重试/超时；不改上方 pip.conf 以保留 RKNN 大层缓存。
 RUN cd yolo11_pt_to_rk_onnx && \
-    pip install --no-cache-dir -r requirements.txt \
+    pip install --no-cache-dir \
+      "torch==2.4.0" "torchvision==0.19.0" \
+      -r requirements.txt \
       --extra-index-url https://pypi.org/simple \
       --retries 15 --timeout 120
 # onnxscript：国内 pip 镜像该包索引页在构建高并发下 SSL 偶发中断(UNEXPECTED_EOF)，
@@ -65,7 +67,8 @@ RUN pip install --no-cache-dir \
 
 # 验证转换链路依赖
 RUN python3 -c "import rknn; print('RKNN OK')" && \
-    python3 -c "import torch; print('PyTorch OK')" && \
+    python3 -c "import torch, torchvision; assert torch.__version__.split('+')[0] == '2.4.0'; assert torchvision.__version__.split('+')[0] == '0.19.0'; print('PyTorch/torchvision OK')" && \
+    python3 -c "import onnx; assert onnx.__version__ == '1.16.1'; print('ONNX OK')" && \
     python3 -c "import ultralytics; print('Ultralytics OK')"
 
 # 复制后端应用(用于注册 celery app 与共享 models/database/tasks)
