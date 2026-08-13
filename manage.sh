@@ -634,7 +634,6 @@ POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=${POSTGRES_DB}
 SECRET_KEY=${SECRET_KEY}
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
 
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
@@ -710,7 +709,6 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
@@ -803,6 +801,8 @@ volumes:
   annotations_data:
   training_output_data:
 COMPOSEFILE
+
+    chmod 600 "$COMPOSE_PROD"
 
     print_success "Docker Compose 配置已生成: docker-compose.prod.yml"
 }
