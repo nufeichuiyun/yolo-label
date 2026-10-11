@@ -47,19 +47,17 @@ TEST_ENV_FILE="$SCRIPT_DIR/.test_env"
 DEFAULT_FRONTEND_PORT=3000
 DEFAULT_BACKEND_PORT=8000
 DEFAULT_DB_PORT=5432
-DEFAULT_REDIS_PORT=6379
 
 # 用户配置（交互中填充）
 ENABLE_GPU=false
 POSTGRES_USER="yolo_label"
 POSTGRES_PASSWORD=""
 POSTGRES_DB="yolo_label_db"
-SECRET_KEY=""
-ADMIN_PASSWORD=""
+SECRET_KEY="${SECRET_KEY:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 FRONTEND_PORT=""
 BACKEND_PORT=""
 DB_PORT=""
-REDIS_PORT=""
 
 # 根据系统内存自动设置 SHM_SIZE（Docker 共享内存，供 PyTorch 多 worker 使用）
 if [ -z "${SHM_SIZE:-}" ]; then
@@ -169,7 +167,8 @@ generate_secret() {
     elif [ -f /dev/urandom ]; then
         head -c "$length" /dev/urandom | base64 | tr -d '\n/+=' | head -c "$length"
     else
-        date +%s%N | sha256sum | head -c "$length"
+        print_error "无法获取密码学安全随机源，停止生成密钥" >&2
+        return 1
     fi
 }
 
@@ -486,7 +485,14 @@ configure_passwords() {
 
     echo -e "  ${CYAN}[2/3] 系统管理员密码${NC}"
     echo -e "  ${DIM}用于登录 yolo-label 系统的 admin 账号${NC}"
-    ADMIN_PASSWORD=$(read_password "请输入管理员密码（至少6位）")
+    while true; do
+        ADMIN_PASSWORD=$(read_password "请输入管理员密码（至少6位，不可使用默认密码）")
+        case "$(printf '%s' "$ADMIN_PASSWORD" | tr '[:upper:]' '[:lower:]')" in
+            admin123|admin|password|changeme)
+                print_warning "不能使用已知默认密码，请重新设置" ;;
+            *) break ;;
+        esac
+    done
     print_success "管理员密码已设置"
     echo ""
 
@@ -560,8 +566,8 @@ configure_ports() {
     echo ""
 
     local has_conflict=false
-    local service_names=("前端界面" "后端API" "数据库" "Redis")
-    local default_ports=($DEFAULT_FRONTEND_PORT $DEFAULT_BACKEND_PORT $DEFAULT_DB_PORT $DEFAULT_REDIS_PORT)
+    local service_names=("前端界面" "后端API" "数据库")
+    local default_ports=($DEFAULT_FRONTEND_PORT $DEFAULT_BACKEND_PORT $DEFAULT_DB_PORT)
 
     for i in "${!default_ports[@]}"; do
         if is_port_in_use "${default_ports[$i]}"; then
@@ -592,12 +598,10 @@ configure_ports() {
         read_port "前端界面" $DEFAULT_FRONTEND_PORT; FRONTEND_PORT="$_PORT_RESULT"
         read_port "后端 API" $DEFAULT_BACKEND_PORT;  BACKEND_PORT="$_PORT_RESULT"
         read_port "数据库"   $DEFAULT_DB_PORT;       DB_PORT="$_PORT_RESULT"
-        read_port "Redis"    $DEFAULT_REDIS_PORT;     REDIS_PORT="$_PORT_RESULT"
     else
         FRONTEND_PORT=$DEFAULT_FRONTEND_PORT
         BACKEND_PORT=$DEFAULT_BACKEND_PORT
         DB_PORT=$DEFAULT_DB_PORT
-        REDIS_PORT=$DEFAULT_REDIS_PORT
     fi
 
     echo ""
@@ -605,7 +609,7 @@ configure_ports() {
     echo -e "    前端界面  → ${CYAN}${FRONTEND_PORT}${NC}"
     echo -e "    后端 API  → ${CYAN}${BACKEND_PORT}${NC}"
     echo -e "    数据库    → ${CYAN}${DB_PORT}${NC}"
-    echo -e "    Redis     → ${CYAN}${REDIS_PORT}${NC}"
+    echo -e "    Redis     → 仅容器内部网络 redis:6379（不映射宿主机端口）"
 }
 
 # 加载已有的生产环境配置
@@ -618,13 +622,29 @@ load_prod_config() {
     FRONTEND_PORT=${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}
     BACKEND_PORT=${BACKEND_PORT:-$DEFAULT_BACKEND_PORT}
     DB_PORT=${DB_PORT:-$DEFAULT_DB_PORT}
-    REDIS_PORT=${REDIS_PORT:-$DEFAULT_REDIS_PORT}
     ENABLE_GPU=${ENABLE_GPU:-false}
+    validate_prod_secret || return 1
     return 0
+}
+
+# 在停止已有服务或写配置前拒绝不安全的旧密钥；不输出密钥内容。
+validate_prod_secret() {
+    local normalized
+    normalized=$(printf '%s' "$SECRET_KEY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+    if [ ${#normalized} -lt 32 ]; then
+        print_error "生产 SECRET_KEY 必须是至少 32 字符的独立随机密钥，请先更新 .env.prod"
+        return 1
+    fi
+    case "$normalized" in
+        change-this-secret-key-in-production|your-secret-key-change-in-production)
+            print_error "生产 SECRET_KEY 不能使用示例值，请先更新 .env.prod"
+            return 1 ;;
+    esac
 }
 
 # 生成生产环境配置文件
 generate_prod_config() {
+    validate_prod_secret || return 1
     print_info "生成环境变量配置..."
     cat > "$ENV_FILE" << EOF
 # yolo-label 生产环境配置（自动生成，请勿手动修改）
@@ -638,7 +658,6 @@ SECRET_KEY=${SECRET_KEY}
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
 DB_PORT=${DB_PORT}
-REDIS_PORT=${REDIS_PORT}
 
 ENABLE_GPU=${ENABLE_GPU}
 EOF
@@ -647,6 +666,7 @@ EOF
 }
 
 generate_compose_prod() {
+    validate_prod_secret || return 1
     print_info "生成 Docker Compose 生产配置..."
 
     local gpu_env_section=""
@@ -691,8 +711,6 @@ services:
     image: redis:7-alpine
     container_name: yolo-label-redis
     restart: always
-    ports:
-      - "${REDIS_PORT}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -708,6 +726,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
+      - YOLO_LABEL_ENV=production
       - SECRET_KEY=${SECRET_KEY}
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
@@ -740,6 +759,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
+      - YOLO_LABEL_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
       - UPLOAD_DIR=/app/uploads
       - ANNOTATION_DIR=/app/annotations
       - MODEL_DIR=/app/models
@@ -759,7 +780,7 @@ ${gpu_env_section}
       redis:
         condition: service_healthy
 ${gpu_deploy_section}
-    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q celery
+    command: sh -c "python -m app.security_config && exec celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q celery"
 
   rknn-worker:
     build:
@@ -770,6 +791,8 @@ ${gpu_deploy_section}
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
+      - YOLO_LABEL_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
       - MODEL_DIR=/app/models
       - QT_QPA_PLATFORM=offscreen
       - DISPLAY=
@@ -780,7 +803,7 @@ ${gpu_deploy_section}
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q rknn
+    command: sh -c "python -m app.security_config && exec celery -A app.celery_app worker --loglevel=info --pool=solo --concurrency=1 -Q rknn"
 
   frontend:
     build:
@@ -930,13 +953,15 @@ init_database() {
         if docker exec -e ADMIN_PASSWORD="$admin_pwd" yolo-label-backend python init_db.py 2>&1; then
             print_success "数据库初始化完成"
         else
-            print_warning "数据库初始化可能已执行过（重新部署时属正常）"
+            print_error "数据库初始化失败，请检查安全配置与数据库日志"
+            return 1
         fi
     else
         if docker exec yolo-label-backend python init_db.py 2>&1; then
             print_success "数据库初始化完成"
         else
-            print_warning "数据库初始化可能已执行过（重新部署时属正常）"
+            print_error "数据库初始化失败，请检查安全配置与数据库日志"
+            return 1
         fi
     fi
 }
@@ -1170,7 +1195,6 @@ deploy_time=$(date '+%Y-%m-%d %H:%M:%S')
 frontend_port=${FRONTEND_PORT}
 backend_port=${BACKEND_PORT}
 db_port=${DB_PORT}
-redis_port=${REDIS_PORT}
 enable_gpu=${ENABLE_GPU}
 compose_file=${COMPOSE_PROD}
 EOF
@@ -1593,6 +1617,7 @@ cmd_offline_package() {
         --exclude='.env' \
         --exclude='.env.prod' \
         --exclude='.credentials' \
+        --exclude='.initial_admin_password' \
         --exclude='.deploy_record' \
         --exclude='uploads_data' \
         --exclude='annotations_data' \
@@ -1617,6 +1642,20 @@ cmd_offline_package() {
 # ============================================================================
 
 set -e
+
+# 任何 Docker / 旧容器操作之前校验；不打印密钥。
+normalized=$(printf '%s' "${SECRET_KEY:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+if [ ${#normalized} -lt 32 ]; then
+    echo "离线部署需先 export SECRET_KEY 为至少 32 字符的随机密钥" >&2
+    exit 1
+fi
+case "$normalized" in
+    change-this-secret-key-in-production|your-secret-key-change-in-production)
+        echo "离线部署不能使用示例 SECRET_KEY" >&2
+        exit 1 ;;
+esac
+unset normalized
+export YOLO_LABEL_ENV=production
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1743,7 +1782,7 @@ sleep 10
 max_retries=5
 retry=0
 while [ $retry -lt $max_retries ]; do
-    if docker exec yolo-label-backend python init_db.py 2>&1 | grep -q "创建成功\|已存在"; then
+    if docker exec yolo-label-backend python init_db.py 2>&1; then
         echo -e "${GREEN}✔ 数据库初始化完成${NC}"
         break
     else
@@ -1754,8 +1793,9 @@ while [ $retry -lt $max_retries ]; do
 done
 
 if [ $retry -eq $max_retries ]; then
-    echo -e "${YELLOW}⚠ 数据库初始化可能失败，请手动检查:${NC}"
-    echo "  docker exec -it yolo-label-backend python init_db.py"
+    echo -e "${RED}数据库初始化失败，部署未完成，请检查配置后重试:${NC}" >&2
+    echo "  docker exec -it yolo-label-backend python init_db.py" >&2
+    exit 1
 fi
 
 echo ""
@@ -1767,7 +1807,7 @@ echo -e "  访问地址:"
 echo -e "    前端界面  ${CYAN}http://localhost:3000${NC}"
 echo -e "    API 文档  ${CYAN}http://localhost:8000/docs${NC}"
 echo ""
-echo -e "  默认账号:  admin / admin123"
+echo -e "  管理员: admin；首次随机密码通过 docker exec yolo-label-backend cat /app/.initial_admin_password 领取并删除文件"
 echo ""
 echo -e "  常用命令:"
 echo -e "    查看状态  docker-compose ps"
@@ -1787,7 +1827,7 @@ DEPLOY_SCRIPT
 
 1. 解压文件: `tar -xzf yolo-label-offline-*.tar.gz`
 2. 进入目录: `cd yolo-label-offline-*`
-3. 运行部署: `./deploy.sh`
+3. 设置并妥善保存独立随机密钥 `SECRET_KEY`（至少 32 字符），通过环境变量导出后运行 `./deploy.sh`；已有部署必须沿用原密钥。
 
 ## 重复部署
 
@@ -1804,7 +1844,7 @@ DEPLOY_SCRIPT
 
 - 前端: http://localhost:3000
 - API 文档: http://localhost:8000/docs
-- 默认账号: admin / admin123
+- 管理员: admin；首次随机密码保存在后端 /app/.initial_admin_password，由主机管理员读取后删除；已有管理员密码不变。
 README_EOF
     print_success "README 已创建"
 
@@ -1831,6 +1871,9 @@ README_EOF
 
 # ======================== 离线环境部署 ========================
 cmd_offline_deploy() {
+    validate_prod_secret || return 1
+    export SECRET_KEY ADMIN_PASSWORD
+    export YOLO_LABEL_ENV=production
     print_banner
     echo -e "  ${BOLD}模式：${CYAN}离线环境部署${NC}"
 
@@ -1924,7 +1967,7 @@ cmd_offline_deploy() {
     echo -e "    前端界面  ${CYAN}http://localhost:${DEFAULT_FRONTEND_PORT}${NC}"
     echo -e "    API 文档  ${CYAN}http://localhost:${DEFAULT_BACKEND_PORT}/docs${NC}"
     echo ""
-    echo -e "  ${BOLD}默认账号：${NC}admin / admin123"
+    echo -e "  ${BOLD}管理员：${NC}admin；首次随机密码见后端 /app/.initial_admin_password，已有密码不变"
     echo ""
     echo -e "  ${BOLD}常用命令：${NC}"
     echo -e "    查看状态  ${DIM}docker-compose ps${NC}"

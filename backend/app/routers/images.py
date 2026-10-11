@@ -2,6 +2,8 @@
 图片管理路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import FileResponse
+from pathlib import Path
 from sqlalchemy.orm import Session
 from typing import List
 from PIL import Image as PILImage
@@ -18,6 +20,52 @@ router = APIRouter(prefix="/api/images", tags=["图片"])
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
+
+
+def check_image_permission(image: Image, user: User, db: Session) -> None:
+    """图片内容和详情遵循与标注列表相同的项目及任务权限。"""
+    check_project_permission(image.project_id, user, db)
+    if user.role == UserRole.ANNOTATOR:
+        assigned = db.query(TaskImage).join(Task).filter(
+            TaskImage.image_id == image.id,
+            Task.project_id == image.project_id,
+            Task.annotator_id == user.id,
+        ).first()
+        if not assigned:
+            raise HTTPException(status_code=403, detail="该图片不在您的任务包中")
+
+
+@router.get("/{image_id}/content")
+async def get_image_content(
+    image_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """凭图片 ID 获取原图，不接受客户端文件路径或 URL 中的令牌。"""
+    image = db.query(Image).filter(Image.id == image_id).first()
+    if not image:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    check_image_permission(image, current_user, db)
+
+    root = Path(UPLOAD_DIR).resolve()
+    project_dir = (root / "images" / str(image.project_id)).resolve()
+    filepath = (root / image.filepath).resolve()
+    # 旧数据库路径无需迁移；同时拒绝路径穿越、跨项目路径和指向目录外的软链接。
+    if (not project_dir.is_relative_to(root)
+            or not filepath.is_relative_to(project_dir)
+            or not filepath.is_file()):
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+    media_type = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".bmp": "image/bmp",
+    }.get(filepath.suffix.lower())
+    if not media_type:
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+    return FileResponse(
+        filepath,
+        media_type=media_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 def get_image_size(filepath: str) -> tuple:
@@ -308,8 +356,7 @@ async def get_image(
     if not image:
         raise HTTPException(status_code=404, detail="图片不存在")
     
-    # 检查项目权限
-    check_project_permission(image.project_id, current_user, db)
+    check_image_permission(image, current_user, db)
     
     # 检查文件是否存在
     full_filepath = os.path.join(UPLOAD_DIR, image.filepath)

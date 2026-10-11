@@ -3,10 +3,19 @@ services:
   backend:
     environment:
       - DEBUG=true
+      - YOLO_LABEL_ENV=development
     volumes:
       - ./backend:/app
       - uploads_data:/app/uploads
       - annotations_data:/app/annotations
+
+  celery-worker:
+    environment:
+      - YOLO_LABEL_ENV=development
+
+  rknn-worker:
+    environment:
+      - YOLO_LABEL_ENV=development
 
   frontend:
     environment:

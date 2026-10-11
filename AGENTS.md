@@ -79,7 +79,8 @@ alembic revision --autogenerate -m "迁移说明"
 
 - 前端改动至少运行 `cd frontend && npm run test` 和 `npm run build`。优先使用 Node.js 20.19+；当前 Vitest 4 工具链不支持项目 Dockerfile 中的 Node 18，若遇到 engine 错误，应如实报告为环境限制，不得归因于业务代码。
 - Vitest 当前覆盖 `frontend/src/**/__tests__/**/*.test.ts`，重点是标注坐标与裁剪工具。
-- 仓库当前没有后端自动化测试，也没有 ESLint、Prettier、Ruff、Black 或其他 lint/format 命令；不要虚构检查结果或引入无关工具。
+- 后端安全回归位于 `backend/tests/`。在独立环境安装 `backend/requirements-test.txt` 后，从仓库根运行 `python -m unittest discover -s backend/tests -v`；使用临时 SQLite/目录，模型解析及任务投递由测试隔离，不替代 GPU/容器验收。
+- 仓库没有 ESLint、Prettier、Ruff、Black 或其他 lint/format 命令；不要虚构检查结果或引入无关工具。
 - 仓库当前没有 CI 配置，不能假定提交后会有远程检查兜底。
 - 后端改动应按影响范围做导入、启动或相关 API 冒烟验证；数据库、Celery 或跨服务改动优先通过相应 Docker 服务验证。
 - 若受 GPU、Docker、数据库或大模型依赖限制而无法完成验证，明确列出未运行的命令和原因。
@@ -101,8 +102,8 @@ alembic revision --autogenerate -m "迁移说明"
 ## 安全边界
 
 - `./manage.sh prod clean`、`./manage.sh test clean` 以及部署脚本中的清理选项会删除容器、数据卷和业务数据；未经用户明确授权不得运行。
-- 不提交 `.env`、`.env.local`、`.env.prod`、`.credentials`、`.deploy_record`、`.test_env`、`.claude/`、生成的 `docker-compose.prod.yml`，或任何密钥、密码、本机路径。
-- 不提交训练产物和校准数据：`models/trained_*.pt`、`models/*.rknn`、`models/*.onnx`、`models/calib/`。不要随意增删大型预训练权重；`models/` 中 n/s/m/l 权重是刻意纳入版本控制的项目资产。
+- 不提交 `.env`、`.env.local`、`.env.prod`、`.credentials`、`.deploy_record`、`.test_env`、`.claude/`、生成的 `docker-compose.prod.yml`，或 `.initial_admin_password`、任何密钥、密码、本机路径。
+- 不提交训练产物和校准数据：`models/trained_*.pt`、`models/*.rknn`、`models/*.onnx`、`models/calib/`。用户上传的私有模型 `models/uploads/` 不得提交。不要随意增删大型预训练权重；`models/` 中 n/s/m/l 权重是刻意纳入版本控制的项目资产。
 - 不覆盖用户上传、标注、数据库卷、训练输出或备份。需要删除运行时数据时，先精确确认目标和恢复方式。
 - 根项目及 vendored Ultralytics 组件采用 AGPL-3.0；新增第三方代码或依赖时检查许可证兼容性并保留必要声明。
 

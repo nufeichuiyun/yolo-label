@@ -4,11 +4,14 @@ import { Layout, Card, Button, Table, Upload, message, Space, Modal, Input, Popc
 import { UploadOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { modelsApi, Model } from '../api/models'
 import './Models.css'
+import { useAuth } from '../contexts/AuthContext'
 
 const { Header, Content } = Layout
 
 export default function Models() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const canUpload = user?.role === 'super_admin'
   const { projectId } = useParams<{ projectId: string }>()
   const [models, setModels] = useState<Model[]>([])
   const [loading, setLoading] = useState(false)
@@ -36,6 +39,7 @@ export default function Models() {
   }
 
   const handleUpload = async () => {
+    if (!canUpload) return
     if (!uploadFile) {
       message.warning('请选择模型文件')
       return
@@ -86,11 +90,6 @@ export default function Models() {
       title: '模型名称',
       dataIndex: 'name',
       key: 'name',
-    },
-    {
-      title: '文件名',
-      dataIndex: 'filename',
-      key: 'filename',
     },
     {
       title: '文件大小',
@@ -152,7 +151,7 @@ export default function Models() {
       <Content className="models-content">
         <Card
           title="AI模型列表"
-          extra={
+          extra={canUpload && (
             <Button
               type="primary"
               icon={<UploadOutlined />}
@@ -160,7 +159,7 @@ export default function Models() {
             >
               上传模型
             </Button>
-          }
+          )}
         >
           <Table
             columns={columns}
@@ -176,7 +175,7 @@ export default function Models() {
 
         <Modal
           title="上传模型"
-          open={uploadModalVisible}
+          open={canUpload && uploadModalVisible}
           onOk={handleUpload}
           onCancel={() => {
             setUploadModalVisible(false)
@@ -189,6 +188,7 @@ export default function Models() {
           confirmLoading={uploading}
         >
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <div>仅超级管理员可上传模型。模型加载可能执行代码，请仅上传已核验的可信来源模型。</div>
             <div>
               <div style={{ marginBottom: 8 }}>模型名称</div>
               <Input

@@ -19,6 +19,15 @@ export interface ImageListResponse {
 }
 
 export const imagesApi = {
+  content: async (id: number, signal?: AbortSignal): Promise<Blob> => {
+    // Use the authenticated client: credentials must never appear in image URLs.
+    const response = await apiClient.get(`/api/images/${id}/content`, {
+      responseType: 'blob',
+      signal,
+    })
+    return response.data
+  },
+
   list: async (projectId: number, skip = 0, limit = 100): Promise<ImageListResponse> => {
     const response = await apiClient.get(`/api/images/project/${projectId}`, {
       params: { skip, limit },

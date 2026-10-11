@@ -8,6 +8,8 @@ models/yolo11x.pt
 models/yolo11x-seg.pt
 # 训练输出模型不纳入版本控制
 models/trained_*.pt
+# 用户上传的私有模型（按项目和随机标识保存）
+models/uploads/
 # RKNN 转换产物与量化校准图(运行期生成)不纳入版本控制
 models/*.rknn
 models/*.onnx
@@ -68,6 +70,7 @@ docker-compose.override.yml
 
 # 部署生成的敏感文件
 .credentials
+.initial_admin_password
 .deploy_record
 .test_env
 

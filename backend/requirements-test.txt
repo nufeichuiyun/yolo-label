@@ -1,0 +1,15 @@
+# 安全回归所需的轻依赖，业务版本与 requirements.txt 对齐。
+# 不安装或加载 PyTorch / Ultralytics；模型解析及任务投递由测试隔离。
+fastapi==0.104.1
+sqlalchemy==2.0.23
+pydantic==2.5.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+python-multipart==0.0.6
+pillow==10.1.0
+redis==5.0.1
+celery==5.3.4
+email-validator==2.1.0
+httpx==0.25.2
+PyYAML==6.0.3

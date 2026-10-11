@@ -7,9 +7,9 @@ from typing import List
 import uuid
 from celery.result import AsyncResult
 from app.database import get_db
-from app.models import User, PreAnnotationTask, Project, Model
+from app.models import User, PreAnnotationTask, Project, Model, UserRole
 from app.schemas import PreAnnotationTaskCreate, PreAnnotationTaskResponse
-from app.auth import get_current_user
+from app.auth import get_current_user, require_project_admin_or_super_admin
 from app.routers.projects import check_project_permission
 from app.celery_app import celery_app
 from app.tasks.preannotation import preannotate_project_task
@@ -20,15 +20,19 @@ router = APIRouter(prefix="/api/preannotation", tags=["预标注"])
 @router.post("", response_model=PreAnnotationTaskResponse)
 async def create_preannotation_task(
     task_data: PreAnnotationTaskCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """创建预标注任务"""
     # 检查项目权限
-    project = check_project_permission(task_data.project_id, current_user, db)
+    project = check_project_permission(task_data.project_id, current_user, db, UserRole.PROJECT_ADMIN)
     
     # 检查模型是否存在
-    model = db.query(Model).filter(Model.id == task_data.model_id).first()
+    # 整项目推理只使用该项目的模型；旧全局模型不能绕过项目隔离。
+    model = db.query(Model).filter(
+        Model.id == task_data.model_id,
+        Model.project_id == task_data.project_id,
+    ).first()
     if not model:
         raise HTTPException(status_code=404, detail="模型不存在")
     
@@ -128,7 +132,7 @@ async def list_project_tasks(
 @router.delete("/task/{task_id}")
 async def cancel_task(
     task_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """取消任务（仅限pending状态）"""
@@ -136,8 +140,8 @@ async def cancel_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     
-    # 检查权限
-    check_project_permission(task.project_id, current_user, db)
+    # 取消整项目任务与启动任务使用相同的管理权限。
+    check_project_permission(task.project_id, current_user, db, UserRole.PROJECT_ADMIN)
     
     if task.status == "running":
         raise HTTPException(status_code=400, detail="无法取消正在运行的任务")

@@ -16,6 +16,8 @@ import './Annotation.css'
 // Hooks
 import { useZoomPan } from './hooks/useZoomPan'
 import { useImageLoader } from './hooks/useImageLoader'
+import { loadProtectedImage } from './utils/protectedImage'
+import { ProtectedImage } from './ProtectedImage'
 import { useAnnotations } from './hooks/useAnnotations'
 import { useDrawing } from './hooks/useDrawing'
 import { useSelection } from './hooks/useSelection'
@@ -23,22 +25,6 @@ import { useSelection } from './hooks/useSelection'
 
 // Constants
 import { RIGHT_CLICK_THRESHOLD, RIGHT_CLICK_TIME_THRESHOLD } from './utils/constants'
-
-// 动态获取API地址
-const getApiBaseUrl = () => {
-  if (import.meta.env.DEV) {
-    return ''
-  }
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL
-  }
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol
-    const hostname = window.location.hostname
-    return `${protocol}//${hostname}:8000`
-  }
-  return 'http://localhost:8000'
-}
 
 export default function Annotation() {
   const { projectId, imageId } = useParams<{ projectId: string; imageId: string }>()
@@ -152,12 +138,7 @@ export default function Annotation() {
   // ============================================================
   // Image loader hook
   // ============================================================
-  const imageLoader = useImageLoader({
-    canvasRef: fabricCanvasRef,
-    setCanvasSize: useCallback(() => {}, []),  // canvas 尺寸在 useEffect 中直接管理
-    onImageLoaded: useCallback(() => {}, []),
-    getApiBaseUrl,
-  })
+  const imageLoader = useImageLoader()
 
   // ============================================================
   // Annotations hook
@@ -839,22 +820,19 @@ export default function Annotation() {
     }
 
     // --- Load and display image ---
-    const apiBaseUrl = import.meta.env.DEV ? '' : getApiBaseUrl()
-    const pathParts = image.filepath.split('/').filter((part: string) => part)
-    const encodedParts = pathParts.map((part: string) => encodeURIComponent(part))
-    const imgUrl = `${apiBaseUrl}/uploads/${encodedParts.join('/')}`
-
     message.loading({ content: '正在加载图片...', key: 'loading-image' })
     const loadTimeout = setTimeout(() => {
+      disposeImage()
       message.destroy('loading-image')
       message.error(`图片加载超时: ${image.filename}`, 5)
     }, 30000)
 
-    fabric.Image.fromURL(imgUrl, (img: fabric.Image) => {
+    const disposeImage = loadProtectedImage(targetImageId, element => {
+      const img = new fabric.Image(element)
       clearTimeout(loadTimeout)
       message.destroy('loading-image')
 
-      if (!fabricCanvasRef.current || (fabricCanvasRef.current as any)._currentImageId !== targetImageId) return
+      if (fabricCanvasRef.current !== canvas || Number(imageIdRef.current) !== targetImageId) return
 
       if (!img || !img.width || !img.height) {
         message.error(`图片加载失败: ${image.filename}`, 10)
@@ -905,7 +883,11 @@ export default function Annotation() {
         scaleY: scale,
         crossOrigin: 'anonymous',
       } as any)
-    }, { crossOrigin: 'anonymous' })
+    }, () => {
+      clearTimeout(loadTimeout)
+      message.destroy('loading-image')
+      message.error(`图片加载失败或无权访问: ${image.filename}`, 10)
+    }, imageLoader.getContent)
 
     // --- Preload adjacent images ---
     if (allImages.length > 0) {
@@ -917,6 +899,9 @@ export default function Annotation() {
 
     // Cleanup
     return () => {
+      clearTimeout(loadTimeout)
+      disposeImage()
+      message.destroy('loading-image')
       if (canvasElement) {
         canvasElement.removeEventListener('contextmenu', preventContextMenu, true)
         canvasElement.removeEventListener('mousedown', handleNativeMouseDown, true)
@@ -1259,11 +1244,6 @@ export default function Annotation() {
         <div className="preview-images-container">
           {previewImages.map((img) => {
             const isCurrent = img.id === Number(imageId)
-            const apiBaseUrl = import.meta.env.DEV ? '' : getApiBaseUrl()
-            const pathParts = img.filepath.split('/').filter((part: string) => part)
-            const encodedPathParts = pathParts.map((part: string) => encodeURIComponent(part))
-            const encodedFilepath = encodedPathParts.join('/')
-            const imgUrl = `${apiBaseUrl}/uploads/${encodedFilepath}`
             return (
               <div
                 key={img.id}
@@ -1291,7 +1271,7 @@ export default function Annotation() {
                   }
                 }}
               >
-                <img src={imgUrl} alt={img.filename} />
+                <ProtectedImage id={img.id} alt={img.filename} getContent={imageLoader.getContent} />
                 {isCurrent && <div className="preview-image-indicator">当前</div>}
                 {img.is_annotated && <div className="preview-image-annotated">✓</div>}
               </div>

@@ -88,6 +88,7 @@ export default function ProjectDetail() {
   const [startingTraining, setStartingTraining] = useState(false)
   
   const { user } = useAuth()
+  const canManageProject = user?.role === 'super_admin' || user?.role === 'project_admin'
 
   // 定义所有加载函数
   const loadProject = async () => {
@@ -562,6 +563,7 @@ export default function ProjectDetail() {
   }
   
   const handleStartPreannotation = async () => {
+    if (!canManageProject) return
     if (!selectedModelId) {
       message.warning('请选择模型')
       return
@@ -590,6 +592,7 @@ export default function ProjectDetail() {
   }
   
   const handleOpenPreannotationModal = () => {
+    if (!canManageProject) return
     setPreannotationModalVisible(true)
     loadModels()
   }
@@ -603,6 +606,7 @@ export default function ProjectDetail() {
   
   // 模型管理相关函数
   const handleUploadModel = async () => {
+    if (user?.role !== 'super_admin') return
     if (!uploadFile) {
       message.warning('请选择模型文件')
       return
@@ -825,6 +829,7 @@ export default function ProjectDetail() {
             >
               模型管理
             </Button>
+            {canManageProject && (
             <Button 
               type="primary" 
               icon={<RobotOutlined />} 
@@ -833,6 +838,7 @@ export default function ProjectDetail() {
             >
               AI预标注
             </Button>
+            )}
             {taskHistory.length > 0 && (
               <Button 
                 type="primary"
@@ -1209,7 +1215,7 @@ export default function ProjectDetail() {
                   {uploading ? '上传中...' : '上传图片'}
                 </Button>
               </Upload>
-              {totalImages > 0 && (
+              {totalImages > 0 && (user?.role === 'super_admin' || user?.role === 'project_admin') && (
                 <Dropdown
                   menu={{
                     items: [
@@ -1641,7 +1647,7 @@ export default function ProjectDetail() {
         {/* AI预标注模态框 */}
         <Modal
           title="AI预标注"
-          open={preannotationModalVisible}
+          open={canManageProject && preannotationModalVisible}
           onCancel={handleClosePreannotationModal}
           footer={null}
           width={800}
@@ -1651,7 +1657,7 @@ export default function ProjectDetail() {
               <div style={{ marginBottom: 8, fontWeight: 500 }}>选择模型</div>
               {models.length === 0 ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
-                  暂无模型，请先上传模型
+                  暂无模型，请联系超级管理员上传可信来源模型
                 </div>
               ) : (
                 <Space direction="vertical" style={{ width: '100%' }}>
@@ -1671,7 +1677,7 @@ export default function ProjectDetail() {
                         <div>
                           <div style={{ fontWeight: 500 }}>{model.name}</div>
                           <div style={{ fontSize: '12px', color: '#999' }}>
-                            {model.filename} {model.is_default && <Tag color="blue">默认</Tag>}
+                            {model.is_default && <Tag color="blue">默认</Tag>}
                           </div>
                         </div>
                       </Space>
@@ -1887,7 +1893,7 @@ export default function ProjectDetail() {
               </div>
               {models.length === 0 ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
-                  暂无模型，请先上传模型
+                  暂无模型，请联系超级管理员上传可信来源模型
                 </div>
               ) : (
                 <Table
@@ -1896,11 +1902,6 @@ export default function ProjectDetail() {
                       title: '模型名称',
                       dataIndex: 'name',
                       key: 'name',
-                    },
-                    {
-                      title: '文件名',
-                      dataIndex: 'filename',
-                      key: 'filename',
                     },
                     {
                       title: '文件大小',
@@ -1956,8 +1957,10 @@ export default function ProjectDetail() {
               )}
             </div>
 
+            {user?.role === 'super_admin' && (
             <div style={{ borderTop: '1px solid #e8e8e8', paddingTop: 16 }}>
               <div style={{ marginBottom: 8, fontWeight: 500 }}>上传新模型</div>
+              <p>模型加载可能执行代码，请仅上传已核验的可信来源模型。</p>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <div>
                   <div style={{ marginBottom: 8 }}>模型名称</div>
@@ -2011,6 +2014,7 @@ export default function ProjectDetail() {
                 </div>
               </Space>
             </div>
+            )}
           </Space>
         </Modal>
 

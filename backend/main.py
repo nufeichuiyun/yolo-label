@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import os
 
 
@@ -113,7 +112,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 静态文件服务（用于图片访问）
+# 图片由 /api/images/{image_id}/content 认证并按项目/任务授权后提供。
 # 使用环境变量指定的目录，如果没有则使用默认目录
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -121,25 +120,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # 模型目录
 MODEL_DIR = os.getenv("MODEL_DIR", os.path.join(os.path.dirname(__file__), "models"))
 os.makedirs(MODEL_DIR, exist_ok=True)
-
-# 自定义静态文件处理器，支持URL编码的文件名
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from urllib.parse import unquote
-import os
-
-class CustomStaticFiles(StaticFiles):
-    async def __call__(self, scope, receive, send):
-        # 解码URL路径，处理URL编码的文件名
-        if scope["type"] == "http":
-            path = scope.get("path", "")
-            # 解码URL编码的路径（多次解码以处理双重编码的情况）
-            decoded_path = unquote(unquote(path))
-            scope["path"] = decoded_path
-            print(f"静态文件请求 - 原始路径: {path}, 解码后路径: {decoded_path}")
-        return await super().__call__(scope, receive, send)
-
-app.mount("/uploads", CustomStaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 @app.get("/")
 async def root():

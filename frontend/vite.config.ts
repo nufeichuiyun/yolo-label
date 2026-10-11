@@ -34,19 +34,6 @@ export default defineConfig({
         onError: (err, req, res) => {
           console.error('[Vite Proxy] 代理错误详情:', err);
         }
-      },
-      '/uploads': {
-        // 代理静态文件请求到后端
-        target: 'http://backend:8000',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path,
-        onProxyReq: (proxyReq, req, res) => {
-          console.log(`[Vite Proxy] 代理静态文件请求: ${req.method} ${req.url} -> backend:8000`);
-        },
-        onError: (err, req, res) => {
-          console.error('[Vite Proxy] 静态文件代理错误详情:', err);
-        }
       }
     }
   }

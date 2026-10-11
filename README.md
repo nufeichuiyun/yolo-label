@@ -85,6 +85,10 @@ REM 双击 scripts\yolo-label.bat 打开控制面板（启动/停止/状态/日�
 scripts\yolo-label.bat
 ```
 
+### 安全部署
+
+生产密钥、首次管理员密码领取、Redis 内网访问和已有安装升级步骤见 [部署安全说明](docs/SECURITY_DEPLOYMENT.md)。模型上传仅限超级管理员，并且必须来自可信来源；原图访问需要登录及项目/任务权限。
+
 ### 系统要求
 
 | 项目 | 最低要求 |

@@ -11,7 +11,7 @@ import json
 import io
 from app.database import get_db
 from app.models import User, Project, Image, Annotation, Category, ProjectUser
-from app.auth import get_current_user, require_project_admin_or_super_admin
+from app.auth import require_project_admin_or_super_admin
 from app.routers.projects import check_project_permission
 from app.models import UserRole, AnnotationType
 from datetime import datetime
@@ -26,12 +26,13 @@ ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 @router.get("/project/{project_id}/yolo")
 async def export_project_yolo(
     project_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """导出项目的YOLO格式数据（只导出有标注的图片）"""
     # 检查项目权限
-    check_project_permission(project_id, current_user, db)
+    # 整项目导出包含其他任务的原图，不能作为标注者绕过图片权限的入口。
+    check_project_permission(project_id, current_user, db, UserRole.PROJECT_ADMIN)
     
     # 获取项目信息
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -219,11 +220,11 @@ def _safe_project_name(project: Project, project_id: int) -> str:
 @router.get("/project/{project_id}/full")
 async def export_project_full(
     project_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """导出完整项目（包含所有图片、类别、标注，可用于导入到其他实例）"""
-    check_project_permission(project_id, current_user, db)
+    check_project_permission(project_id, current_user, db, UserRole.PROJECT_ADMIN)
 
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:

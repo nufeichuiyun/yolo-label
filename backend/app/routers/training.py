@@ -16,7 +16,7 @@ from typing import List
 from app.database import get_db
 from app.models import User, TrainingTask, Project, Category, UserRole
 from app.schemas import TrainingTaskCreate, TrainingTaskResponse, TrainingTaskMetrics
-from app.auth import get_current_user
+from app.auth import get_current_user, require_project_admin_or_super_admin
 from app.routers.projects import check_project_permission
 from app.services.training_service import (
     get_annotated_images_for_project,
@@ -57,7 +57,7 @@ def _get_latest_metrics(task_id: str) -> TrainingTaskMetrics | None:
 @router.post("", response_model=TrainingTaskResponse)
 async def create_training_task(
     task_data: TrainingTaskCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """创建训练任务（仅项目管理员或超级管理员可操作）"""
@@ -153,7 +153,7 @@ async def get_training_task(
 @router.post("/task/{task_id}/revoke")
 async def revoke_training_task(
     task_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """中断/停止正在进行的训练任务（即使 Redis 映射丢失也会强制标记为失败，避免任务卡死）"""
@@ -246,14 +246,14 @@ async def download_trained_model(
 @router.get("/download-archive/{task_id}")
 async def download_training_archive(
     task_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_admin_or_super_admin),
     db: Session = Depends(get_db)
 ):
     """下载训练完整包（数据集+模型+训练曲线 zip）"""
     task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    check_project_permission(task.project_id, current_user, db)
+    check_project_permission(task.project_id, current_user, db, UserRole.PROJECT_ADMIN)
 
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="任务未完成，无法下载归档")

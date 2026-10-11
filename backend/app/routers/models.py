@@ -7,10 +7,11 @@ from typing import List
 import os
 import shutil
 import json
+from uuid import uuid4
 from app.database import get_db
-from app.models import User, Model
+from app.models import User, Model, UserRole
 from app.schemas import ModelResponse, ModelListResponse, ModelCreate
-from app.auth import get_current_user
+from app.auth import get_current_user, require_super_admin
 
 router = APIRouter(prefix="/api/models", tags=["模型管理"])
 
@@ -29,10 +30,10 @@ async def upload_model(
     name: str = Form(...),
     description: str = Form(""),
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db)
 ):
-    """上传模型文件"""
+    """仅可信超级管理员可上传模型；PT 解析具有执行代码的能力。"""
     from app.routers.projects import check_project_permission
     
     # 检查项目权限
@@ -41,7 +42,7 @@ async def upload_model(
     ensure_model_dir()
     
     # 检查文件扩展名
-    file_ext = os.path.splitext(file.filename)[1].lower()
+    file_ext = os.path.splitext(file.filename or "")[1].lower()
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -56,21 +57,26 @@ async def upload_model(
     if existing_model:
         raise HTTPException(status_code=400, detail="该项目下模型名称已存在")
     
+    # filename 保留相对 MODEL_DIR 的路径语义，旧版根目录文件仍可直接读取。
+    # 不使用客户端文件名，避免跨项目覆盖模型或预置权重。
+    safe_filename = f"uploads/{project_id}/{uuid4().hex}{file_ext}"
+    filepath = os.path.join(MODEL_DIR, safe_filename)
+    created_file = False
+    committed = False
     try:
-        # 保存文件
-        safe_filename = file.filename.replace('/', '_').replace('\\', '_').replace('..', '_')
-        filepath = os.path.join(MODEL_DIR, safe_filename)
-        
-        with open(filepath, "wb") as buffer:
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # 排他创建，即使 UUID 碰撞也不能覆盖或在错误清理时删除已有文件。
+        with open(filepath, "xb") as buffer:
+            created_file = True
             shutil.copyfileobj(file.file, buffer)
         
         file_size = os.path.getsize(filepath)
         
         # 尝试提取模型类别信息
-        # 优先使用celery worker（使用容器内安装的ultralytics）来解析
+        # 同步解析在后端进程内执行，不能把 Celery 函数名当作隔离边界。
         class_names = None
         try:
-            # 首先尝试通过celery worker解析（使用容器内安装的ultralytics）
+            # 使用容器内安装的 Ultralytics 同步解析可信模型。
             from app.tasks.models import extract_model_classes_sync
             result = extract_model_classes_sync(filepath)
             if result and isinstance(result, list) and len(result) > 0:
@@ -132,14 +138,21 @@ async def upload_model(
         )
         db.add(db_model)
         db.commit()
+        committed = True
         db.refresh(db_model)
         
         return db_model
     except Exception as e:
-        # 如果保存失败，删除文件
-        if os.path.exists(filepath):
-            os.remove(filepath)
-        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+        db.rollback()
+        # 仅清理本次排他创建且尚未提交的文件，不触碰旧模型/基础权重。
+        if created_file and not committed:
+            try:
+                os.remove(filepath)
+            except FileNotFoundError:
+                pass
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail="模型上传失败") from e
 
 
 @router.get("/project/{project_id}", response_model=ModelListResponse)
@@ -168,6 +181,8 @@ async def get_model(
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="模型不存在")
+    from app.routers.projects import check_project_permission
+    check_project_permission(model.project_id, current_user, db)
     return model
 
 
@@ -188,7 +203,7 @@ async def delete_model(
     check_project_permission(model.project_id, current_user, db)
     
     # 检查权限（只有创建者或管理员可以删除）
-    if model.created_by != current_user.id and current_user.role != "admin":
+    if model.created_by != current_user.id and current_user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="无权删除此模型")
     
     # 删除文件
@@ -244,6 +259,9 @@ async def get_model_classes(
     if not model:
         raise HTTPException(status_code=404, detail="模型不存在")
     
+    from app.routers.projects import check_project_permission
+    check_project_permission(model.project_id, current_user, db)
+
     # 如果数据库中有类别信息且不强制重新解析，直接返回
     if model.class_names and not force_reparse:
         try:
@@ -254,7 +272,7 @@ async def get_model_classes(
             pass
     
     # 如果数据库中没有，或者强制重新解析，尝试从模型文件实时解析
-    # 使用celery任务来解析（celery worker使用容器内安装的ultralytics）
+    # 复用 Celery 任务函数；apply() 在当前进程执行，并不提供隔离。
     # 使用绝对路径，避免相对路径问题
     filepath = os.path.join(MODEL_DIR, model.filename)
     if not os.path.isabs(filepath):
@@ -273,7 +291,7 @@ async def get_model_classes(
         try:
             print(f"[DEBUG] 尝试通过celery任务解析...")
             from app.tasks.models import extract_model_classes_task
-            # 使用celery的apply()方法同步调用任务（在celery worker中执行）
+            # apply() 在当前后端进程同步调用任务。
             task_result = extract_model_classes_task.apply(args=[filepath])
             print(f"[DEBUG] celery任务已提交，等待结果...")
             result = task_result.get(timeout=30)  # 等待30秒
