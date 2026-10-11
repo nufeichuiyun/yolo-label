@@ -106,6 +106,20 @@ async def create_annotations(
         if not task_image:
             raise HTTPException(status_code=403, detail="无权标注此图片，该图片不在您的任务包中")
     
+    # 先校验整批类别归属，再替换旧标注，避免跨项目关联及部分更新。
+    category_ids = [item.get("category_id") for item in annotations]
+    if any(type(category_id) is not int or category_id <= 0 for category_id in category_ids):
+        raise HTTPException(status_code=400, detail="所有标注必须使用当前项目的有效类别")
+    if category_ids:
+        allowed_ids = {
+            row[0] for row in db.query(Category.id).filter(
+                Category.project_id == image.project_id,
+                Category.id.in_(set(category_ids)),
+            ).all()
+        }
+        if set(category_ids) - allowed_ids:
+            raise HTTPException(status_code=400, detail="所有标注必须使用当前项目的有效类别")
+
     # 删除该图片的旧标注
     db.query(Annotation).filter(Annotation.image_id == image_id).delete()
     
@@ -116,11 +130,6 @@ async def create_annotations(
         # 支持bbox（目标检测）和polygon（实例分割）两种格式
         annotation_data = ann_data.get("bbox") or ann_data.get("polygon") or {}
         bbox_data = json.dumps(annotation_data)
-        
-        # 验证类别是否存在
-        category = db.query(Category).filter(Category.id == category_id).first()
-        if not category:
-            continue
         
         db_ann = Annotation(
             image_id=image_id,

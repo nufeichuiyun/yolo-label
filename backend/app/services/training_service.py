@@ -6,6 +6,8 @@ import json
 import shutil
 import random
 import tempfile
+import yaml
+from app.trusted_models import allowed_base_models, default_base_model
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -133,20 +135,17 @@ def prepare_dataset(
     
     # 生成 data.yaml
     names_dict = {i: cat.name for i, cat in enumerate(categories)}
-    data_yaml_content = f"""# YOLO 训练数据集配置 - 由 yolo-label 自动生成
-path: {os.path.abspath(output_dir)}
-train: images/train
-val: images/val
-
-names:
-"""
-    for idx, cat in enumerate(categories):
-        data_yaml_content += f"  {idx}: {cat.name}\n"
-    
+    # 类别名称来自用户输入，必须序列化为 YAML 字面值，不能注入 download/path 等配置。
+    dataset_config = {
+        "path": os.path.abspath(output_dir),
+        "train": "images/train",
+        "val": "images/val",
+        "names": names_dict,
+    }
     data_yaml_path = os.path.join(output_dir, "data.yaml")
     with open(data_yaml_path, "w", encoding="utf-8") as f:
-        f.write(data_yaml_content)
-    
+        yaml.safe_dump(dataset_config, f, allow_unicode=True, sort_keys=False)
+
     return data_yaml_path, len(train_images), len(val_images)
 
 
@@ -218,26 +217,15 @@ def collect_calibration_images(
 
 
 def get_default_base_model(annotation_type: str) -> str:
-    """根据项目标注类型返回默认基础模型"""
-    if annotation_type == "segmentation":
-        return "yolo11n-seg.pt"
-    return "yolo11n.pt"
+    """根据项目标注类型返回已核验基础模型。"""
+    return default_base_model(annotation_type)
 
 
 def get_available_base_models(annotation_type: str) -> List[dict]:
-    """返回可用的基础模型列表"""
-    detection_models = [
-        {"value": "yolo11n.pt", "label": "YOLO11 Nano (最快)"},
-        {"value": "yolo11s.pt", "label": "YOLO11 Small"},
-        {"value": "yolo11m.pt", "label": "YOLO11 Medium"},
-        {"value": "yolo11l.pt", "label": "YOLO11 Large"},
-        {"value": "yolo11x.pt", "label": "YOLO11 X-Large (最准)"},
+    """只列出发行包中已核验的 n/s/m/l 权重；不自动下载未收录的 x 权重。"""
+    labels = ("Nano (最快)", "Small", "Medium", "Large")
+    suffix = " Seg" if annotation_type == "segmentation" else ""
+    return [
+        {"value": name, "label": f"YOLO11 {label}{suffix}"}
+        for name, label in zip(allowed_base_models(annotation_type), labels)
     ]
-    segmentation_models = [
-        {"value": "yolo11n-seg.pt", "label": "YOLO11 Nano Seg (最快)"},
-        {"value": "yolo11s-seg.pt", "label": "YOLO11 Small Seg"},
-        {"value": "yolo11m-seg.pt", "label": "YOLO11 Medium Seg"},
-        {"value": "yolo11l-seg.pt", "label": "YOLO11 Large Seg"},
-        {"value": "yolo11x-seg.pt", "label": "YOLO11 X-Large Seg (最准)"},
-    ]
-    return segmentation_models if annotation_type == "segmentation" else detection_models

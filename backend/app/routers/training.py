@@ -26,6 +26,7 @@ from app.services.training_service import (
 from app.services.training_archive_service import TRAINING_ARCHIVES_DIR
 from app.tasks.training import train_model_task, TRAINING_METRICS_KEY_PREFIX
 from app.celery_app import celery_app
+from app.trusted_models import validate_base_model
 
 router = APIRouter(prefix="/api/training", tags=["训练"])
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
@@ -85,7 +86,11 @@ async def create_training_task(
         raise HTTPException(status_code=400, detail="该项目已有训练任务正在运行，请先停止或等待完成后再开始新训练")
 
     # 确定基础模型
-    base_model = task_data.base_model or get_default_base_model(project.annotation_type.value)
+    try:
+        base_model = task_data.base_model if task_data.base_model is not None else get_default_base_model(project.annotation_type.value)
+        validate_base_model(base_model, project.annotation_type.value, MODEL_DIR)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     epochs = task_data.epochs or 100
     imgsz = task_data.imgsz or 640
     batch = task_data.batch if task_data.batch is not None else 16  # 0=自动根据显存
@@ -209,8 +214,11 @@ async def get_base_models(
 ):
     """获取项目可用的基础模型列表（根据标注类型）"""
     project = check_project_permission(project_id, current_user, db)
-    models = get_available_base_models(project.annotation_type.value)
-    default = get_default_base_model(project.annotation_type.value)
+    try:
+        models = get_available_base_models(project.annotation_type.value)
+        default = get_default_base_model(project.annotation_type.value)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return {"models": models, "default": default}
 
 

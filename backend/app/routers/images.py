@@ -9,6 +9,7 @@ from typing import List
 from PIL import Image as PILImage
 import os
 import shutil
+from uuid import uuid4
 from app.database import get_db
 from app.models import User, Image, Project, Annotation, Task, TaskImage, UserRole
 from app.schemas import ImageResponse, ImageListResponse
@@ -84,9 +85,24 @@ async def upload_images(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """上传图片（支持批量上传，自动分批处理以避免超时）"""
+    """上传图片，使用唯一存储名并原子提交图片及任务记录。"""
     import sys
-    import asyncio
+    owned_paths = set()
+
+    def remove_owned_file(filepath):
+        # 仅删除本次成功创建的文件，排他创建失败（包括碰撞）不取得文件所有权。
+        if filepath in owned_paths:
+            try:
+                Path(filepath).unlink(missing_ok=True)
+                owned_paths.remove(filepath)
+            except OSError:
+                pass
+
+    def rollback_upload():
+        db.rollback()
+        for filepath in list(owned_paths):
+            remove_owned_file(filepath)
+
     sys.stdout.flush()  # 确保输出立即刷新
     try:
         print(f"[DEBUG] 收到上传请求，项目ID: {project_id}, 文件数量: {len(files) if files else 0}", flush=True)
@@ -126,63 +142,49 @@ async def upload_images(
 
         uploaded_images = []
 
-        # 处理文件上传（支持大量文件，使用异步处理避免阻塞）
+        # 标注、导出及训练都按 filename 推导标签名，因此文件名和路径都需唯一。
         for idx, file in enumerate(files):
-            # 每处理100个文件，输出一次进度
             if idx > 0 and idx % 100 == 0:
                 print(f"[DEBUG] 已处理 {idx}/{len(files)} 个文件", flush=True)
-                # 定期提交，避免事务过大
-                if len(uploaded_images) > 0:
-                    db.commit()
-                    for img in uploaded_images:
-                        db.refresh(img)
-            
+            filepath = None
+            created_current_file = False
             try:
-                # 清理文件名，移除可能导致问题的字符，但保留中文和基本特殊字符
-                # 只移除路径分隔符和危险字符
-                safe_filename = file.filename.replace('/', '_').replace('\\', '_').replace('..', '_')
-                
-                # 保存文件
+                safe_name = file.filename.replace('/', '_').replace('\\', '_').replace('..', '_')
+                stem, extension = os.path.splitext(safe_name)
+                # 在文件系统字节上限内为 UUID 和扩展名留出空间。
+                stem = stem.encode('utf-8')[:255 - 33 - len(extension.encode('utf-8'))].decode('utf-8', errors='ignore')
+                safe_filename = f"{uuid4().hex}_{stem}{extension}"
                 filepath = os.path.join(project_dir, safe_filename)
-                with open(filepath, "wb") as buffer:
+                with open(filepath, "xb") as buffer:
+                    created_current_file = True
+                    owned_paths.add(filepath)
                     shutil.copyfileobj(file.file, buffer)
-                
-                # 验证文件是否成功保存
-                if not os.path.exists(filepath):
-                    print(f"警告：文件保存后不存在: {filepath}", flush=True)
-                    continue
-                
-                # 获取图片尺寸
+
                 width, height = get_image_size(filepath)
                 file_size = os.path.getsize(filepath)
-                
-                # 验证文件大小
                 if file_size == 0:
-                    print(f"警告：文件大小为0，跳过: {filepath}", flush=True)
-                    os.remove(filepath)  # 删除空文件
+                    remove_owned_file(filepath)
                     continue
-                
-                # 创建数据库记录
-                relative_path = f"images/{project_id}/{safe_filename}"
-                db_image = Image(
-                    project_id=project_id,
-                    filename=safe_filename,
-                    filepath=relative_path,
-                    width=width,
-                    height=height,
-                    file_size=file_size
-                )
-                db.add(db_image)
-                uploaded_images.append(db_image)
             except Exception as e:
+                if created_current_file:
+                    remove_owned_file(filepath)
                 print(f"上传文件失败: {file.filename}, 错误: {str(e)}", flush=True)
                 continue
-        
-        db.commit()
-        
-        for img in uploaded_images:
-            db.refresh(img)
-        
+
+            # 数据库失败必须终止事务并清理本批新文件，不能吞掉错误后继续使用失效会话。
+            db_image = Image(
+                project_id=project_id,
+                filename=safe_filename,
+                filepath=f"images/{project_id}/{safe_filename}",
+                width=width,
+                height=height,
+                file_size=file_size
+            )
+            db.add(db_image)
+            uploaded_images.append(db_image)
+
+        db.flush()
+
         # 如果项目设置了images_per_task，自动创建任务包
         if project.images_per_task and project.images_per_task > 0:
             # 检查哪些图片已经被分配到任务包
@@ -233,7 +235,6 @@ async def upload_images(
                         )
                         db.add(task_image)
                 
-                db.commit()
                 last_task_count = len(unassigned_image_ids) % images_per_task
                 if last_task_count == 0:
                     last_task_count = images_per_task
@@ -241,6 +242,12 @@ async def upload_images(
             else:
                 print(f"[DEBUG] 所有上传的图片都已被分配到任务包，跳过自动创建")
         
+        # 图片与自动分包一起提交；成功提交后的读取失败不能删除已落库的图片。
+        db.commit()
+        owned_paths.clear()
+        for img in uploaded_images:
+            db.refresh(img)
+
         failed_count = len(files) - len(uploaded_images)
         print(f"[DEBUG] 上传完成，成功: {len(uploaded_images)}, 失败: {failed_count}")
         return {
@@ -251,8 +258,10 @@ async def upload_images(
             "total_count": len(files)
         }
     except HTTPException:
+        rollback_upload()
         raise
     except Exception as e:
+        rollback_upload()
         print(f"[ERROR] 上传图片时发生错误: {str(e)}")
         import traceback
         traceback.print_exc()

@@ -13,6 +13,7 @@ from app.services.training_service import prepare_dataset, collect_calibration_i
 from app.services.training_archive_service import create_training_archive
 from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
+from app.trusted_models import validate_base_model
 
 try:
     import torch
@@ -74,6 +75,12 @@ def train_model_task(
         if not task:
             raise ValueError(f"训练任务不存在: {task_id}")
 
+        # 队列参数也不构成信任边界：按数据库中的真实项目与类型再次校验。
+        if task.project_id != project_id:
+            raise ValueError("训练任务与项目不匹配")
+        project = db.query(Project).filter(Project.id == task.project_id).first()
+        if not project:
+            raise ValueError("训练项目不存在")
         # 幂等防护：Redis broker 在断连/重连、worker 重启等情况下可能重投递同一任务消息
         # （solo pool 下 acks_late=False 实际为"完成后才确认"，消息整轮挂在 unacked，broker
         # 一抖动即被恢复成重复副本，visibility_timeout 管不到这种重连恢复）。任务产出模型后，
@@ -91,13 +98,12 @@ def train_model_task(
                 "output_model_path": task.output_model_path,
             }
 
+        # 已产出模型的重复投递无需再次加载基础权重；仅真正训练前验证。
+        validate_base_model(base_model, project.annotation_type.value, MODEL_DIR)
+
         task.status = "running"
         task.progress = 0
         db.commit()
-
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise ValueError(f"项目不存在: {project_id}")
 
         # 1. 准备数据集
         task.progress = 5
@@ -145,6 +151,8 @@ def train_model_task(
                     output_project,
                     "--base-model",
                     base_model,
+                    "--annotation-type",
+                    project.annotation_type.value,
                     "--epochs",
                     str(epochs),
                     "--imgsz",

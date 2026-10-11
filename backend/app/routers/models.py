@@ -250,90 +250,38 @@ async def set_default_model(
 @router.get("/{model_id}/classes")
 async def get_model_classes(
     model_id: int,
-    force_reparse: bool = True,  # 默认强制重新解析，确保获取最新的类别信息
+    force_reparse: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取模型的类别列表"""
+    """只读取持久化类别；GET 不得加载模型、执行任务或写数据库。"""
     model = db.query(Model).filter(Model.id == model_id).first()
     if not model:
         raise HTTPException(status_code=404, detail="模型不存在")
-    
+
     from app.routers.projects import check_project_permission
     check_project_permission(model.project_id, current_user, db)
 
-    # 如果数据库中有类别信息且不强制重新解析，直接返回
-    if model.class_names and not force_reparse:
+    if force_reparse:
+        # 兼容旧客户端参数但明确拒绝，包括超级管理员；不保留解析旁路。
+        raise HTTPException(
+            status_code=400,
+            detail="已停用模型类别重新解析，请由可信超级管理员重新上传模型",
+        )
+
+    if model.class_names:
         try:
             classes = json.loads(model.class_names)
-            if isinstance(classes, list) and len(classes) > 0:
-                return {"classes": classes}
-        except:
-            pass
-    
-    # 如果数据库中没有，或者强制重新解析，尝试从模型文件实时解析
-    # 复用 Celery 任务函数；apply() 在当前进程执行，并不提供隔离。
-    # 使用绝对路径，避免相对路径问题
-    filepath = os.path.join(MODEL_DIR, model.filename)
-    if not os.path.isabs(filepath):
-        filepath = os.path.abspath(filepath)
-    
-    print(f"[DEBUG] get_model_classes - 模型ID: {model_id}, 文件名: {model.filename}")
-    print(f"[DEBUG] get_model_classes - MODEL_DIR: {MODEL_DIR}")
-    print(f"[DEBUG] get_model_classes - 文件路径: {filepath}")
-    print(f"[DEBUG] get_model_classes - 文件是否存在: {os.path.exists(filepath)}")
-    print(f"[DEBUG] get_model_classes - force_reparse: {force_reparse}")
-    print(f"[DEBUG] get_model_classes - 数据库中已有类别: {model.class_names is not None}")
-    if model.class_names:
-        print(f"[DEBUG] get_model_classes - 数据库中类别内容（前100字符）: {model.class_names[:100]}...")
-    
-    if os.path.exists(filepath):
-        try:
-            print(f"[DEBUG] 尝试通过celery任务解析...")
-            from app.tasks.models import extract_model_classes_task
-            # apply() 在当前后端进程同步调用任务。
-            task_result = extract_model_classes_task.apply(args=[filepath])
-            print(f"[DEBUG] celery任务已提交，等待结果...")
-            result = task_result.get(timeout=30)  # 等待30秒
-            print(f"[DEBUG] celery任务返回结果: {result}")
-            print(f"[DEBUG] 结果类型: {type(result)}")
-            if result and isinstance(result, list) and len(result) > 0:
-                print(f"[DEBUG] celery任务解析成功，类别数量: {len(result)}")
-                print(f"[DEBUG] 类别列表（前10个）: {result[:10]}")
-                # 更新数据库
-                model.class_names = json.dumps(result, ensure_ascii=False)
-                db.commit()
-                print(f"[SUCCESS] 成功解析模型类别: {len(result)} 个类别")
-                return {"classes": result}
-            else:
-                print(f"[WARNING] celery任务返回空结果或无效结果")
-        except Exception as e:
-            print(f"[ERROR] 通过celery任务解析失败: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # 如果celery失败，尝试使用同步方式（直接调用，使用容器内安装的ultralytics）
-        try:
-            print(f"[DEBUG] 尝试使用subprocess方式解析...")
-            from app.tasks.models import extract_model_classes_sync
-            result = extract_model_classes_sync(filepath)
-            print(f"[DEBUG] subprocess方式返回结果: {result}")
-            if result and isinstance(result, list) and len(result) > 0:
-                print(f"[DEBUG] subprocess方式解析成功，类别数量: {len(result)}")
-                print(f"[DEBUG] 类别列表（前10个）: {result[:10]}")
-                model.class_names = json.dumps(result, ensure_ascii=False)
-                db.commit()
-                print(f"[SUCCESS] 成功解析模型类别: {len(result)} 个类别")
-                return {"classes": result}
-            else:
-                print(f"[WARNING] subprocess方式返回空结果")
-        except Exception as e2:
-            print(f"[ERROR] subprocess方式也失败: {e2}")
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"[ERROR] 模型文件不存在: {filepath}")
-    
-    # 如果都没有，返回空列表
-    print(f"[WARNING] 无法解析模型类别，返回空列表")
-    return {"classes": []}
+        except (ValueError, TypeError):
+            classes = None
+        if (
+            isinstance(classes, list)
+            and classes
+            and all(isinstance(name, str) and name.strip() for name in classes)
+        ):
+            return {"classes": classes}
+
+    return {
+        "classes": [],
+        "message": "该模型没有可用类别信息，请由可信超级管理员重新上传模型",
+    }

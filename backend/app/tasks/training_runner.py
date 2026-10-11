@@ -5,6 +5,7 @@
 import json
 import os
 import sys
+from app.trusted_models import validate_base_model
 
 
 def run_training(
@@ -17,6 +18,7 @@ def run_training(
     batch: int,
     workers: int,
     device: str,
+    annotation_type: str,
 ) -> int:
     """
     在子进程中执行 YOLO 训练。进程退出时所有内存被 OS 回收。
@@ -25,6 +27,8 @@ def run_training(
         0 成功, 非 0 失败
     """
     try:
+        # 最后一道边界必须先于导入/调用模型加载器；绝不触发自动下载。
+        model_path = validate_base_model(base_model, annotation_type)
         from ultralytics import YOLO
 
         from app.task_heartbeat import mark_alive
@@ -32,16 +36,7 @@ def run_training(
         # 子进程一启动即写首个心跳，覆盖"父任务已置 running、子进程仍在加载"的空窗
         mark_alive(task_id)
 
-        # 若 base_model 为文件名（非绝对路径）且 MODEL_DIR 中已存在，优先使用本地文件，避免无网络时下载失败
-        model_path = base_model
-        if not os.path.isabs(base_model):
-            model_dir = os.getenv("MODEL_DIR", "./models")
-            local_path = os.path.join(model_dir, base_model)
-            if os.path.isfile(local_path):
-                model_path = os.path.abspath(local_path)
-                print(f"[training] 使用本地模型: {model_path}", flush=True)
-
-        model = YOLO(model_path)
+        model = YOLO(str(model_path))
 
         # 进度回调：通过 Redis 和 DB 更新，供主进程/前端读取
         def _update_progress(current_epoch: int, progress_pct: int):
@@ -168,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-yaml", required=True)
     parser.add_argument("--output-project", required=True)
     parser.add_argument("--base-model", required=True)
+    parser.add_argument("--annotation-type", required=True, choices=("detection", "segmentation"))
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=-1)
@@ -186,5 +182,6 @@ if __name__ == "__main__":
             batch=args.batch,
             workers=args.workers,
             device=args.device,
+            annotation_type=args.annotation_type,
         )
     )

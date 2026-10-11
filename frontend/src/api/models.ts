@@ -21,6 +21,7 @@ export interface ModelListResponse {
 
 export interface ModelClassesResponse {
   classes: string[]
+  message?: string
 }
 
 export const modelsApi = {
@@ -61,12 +62,9 @@ export const modelsApi = {
     await client.post(`/api/models/${modelId}/set-default`)
   },
 
-  // 获取模型类别列表
-  getClasses: async (modelId: number, forceReparse: boolean = true): Promise<ModelClassesResponse> => {
-    // 默认强制重新解析，确保获取最新的类别信息
-    const response = await client.get(`/api/models/${modelId}/classes`, {
-      params: { force_reparse: forceReparse }
-    })
+  // 只读取上传时持久化的类别，不触发模型解析。
+  getClasses: async (modelId: number): Promise<ModelClassesResponse> => {
+    const response = await client.get(`/api/models/${modelId}/classes`)
     return response.data
   },
 }

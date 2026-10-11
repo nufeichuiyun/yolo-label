@@ -173,6 +173,8 @@ export default function ProjectDetail() {
   }
   
   const loadModelClasses = async (modelId: number) => {
+    setModelClasses([])
+    setSelectedClasses([])
     setLoadingClasses(true)
     try {
       const data = await modelsApi.getClasses(modelId)
@@ -1694,7 +1696,7 @@ export default function ProjectDetail() {
                   <Spin />
                 ) : modelClasses.length === 0 ? (
                   <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
-                    该模型没有类别信息
+                    该模型没有可用类别信息，请联系可信超级管理员重新上传模型。
                   </div>
                 ) : (
                   <div style={{ maxHeight: '300px', overflowY: 'auto' }}>

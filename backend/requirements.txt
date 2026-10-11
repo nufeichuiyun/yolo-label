@@ -13,6 +13,7 @@ pillow==10.1.0
 redis==5.0.1
 celery==5.3.4
 email-validator==2.1.0
+PyYAML==6.0.3
 
 # YOLO11和PyTorch依赖
 # torch 2.7.1 + cu128：支持 Blackwell GPU(算力 sm_120，如 RTX PRO Blackwell / RTX 50 系）。

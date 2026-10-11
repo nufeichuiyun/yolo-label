@@ -14,13 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import get_current_user
 from app.database import Base, get_db
-from app.models import AnnotationType, Model, Project, User, UserRole
+from app.models import AnnotationType, Model, Project, ProjectUser, User, UserRole
 from app.routers import models
 
 
@@ -131,7 +131,9 @@ class ModelSecurityTests(unittest.TestCase):
         row, path = self.add_legacy_model()
         response = self.client.get(f"/api/models/{row.id}/classes")
         self.assertEqual(response.status_code, 200)
-        self.parser.extract_model_classes_task.apply.assert_called_once_with(args=[str(path)])
+        self.assertEqual(response.json()["classes"], [])
+        self.parser.extract_model_classes_task.apply.assert_not_called()
+        self.parser.extract_model_classes_sync.assert_not_called()
         self.assertEqual(self.client.get(f"/api/models/{row.id}").json()["filepath"], "models/legacy.pt")
         self.assertEqual(self.client.delete(f"/api/models/{row.id}").status_code, 200)
         self.assertFalse(path.exists())
@@ -143,6 +145,79 @@ class ModelSecurityTests(unittest.TestCase):
             self.assertEqual(self.client.get(f"/api/models/{row.id}{suffix}").status_code, 403)
         self.parser.extract_model_classes_sync.assert_not_called()
         self.parser.extract_model_classes_task.apply.assert_not_called()
+
+    def read_classes_without_side_effects(self, row, query=""):
+        statements = []
+        def capture_sql(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement.strip().split()[0].upper())
+        fake_ultralytics = types.ModuleType("ultralytics")
+        fake_ultralytics.YOLO = Mock(side_effect=AssertionError("GET cannot load a model"))
+        original_cache = row.class_names
+        event.listen(self.engine, "before_cursor_execute", capture_sql)
+        try:
+            with patch.dict(sys.modules, {"ultralytics": fake_ultralytics}), patch.object(self.db, "commit") as commit:
+                response = self.client.get(f"/api/models/{row.id}/classes{query}")
+                commit.assert_not_called()
+        finally:
+            event.remove(self.engine, "before_cursor_execute", capture_sql)
+        fake_ultralytics.YOLO.assert_not_called()
+        self.parser.extract_model_classes_sync.assert_not_called()
+        self.parser.extract_model_classes_task.apply.assert_not_called()
+        self.assertTrue(all(statement == "SELECT" for statement in statements), statements)
+        self.assertEqual(row.class_names, original_cache)
+        self.assertFalse(self.db.dirty)
+        return response
+
+    def make_member(self):
+        self.other.role = UserRole.ANNOTATOR
+        self.db.add(ProjectUser(project_id=self.projects[0].id, user_id=self.other.id, role=UserRole.ANNOTATOR))
+        self.db.commit()
+        self.current_user = self.other
+
+    def test_member_reads_persisted_classes_without_loading_model(self):
+        row, path = self.add_legacy_model()
+        row.class_names = '["猫", "dog"]'
+        self.db.commit()
+        self.make_member()
+        # 即使权重已不存在，元数据读取仍应正常工作。
+        path.unlink()
+        for query in ("", "?force_reparse=false"):
+            response = self.read_classes_without_side_effects(row, query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"classes": ["猫", "dog"]})
+
+    def test_missing_or_malformed_metadata_never_falls_back_to_loading(self):
+        row, _ = self.add_legacy_model()
+        self.make_member()
+        for value in (None, "", "not-json", "null", "{}", '"cat"', "[]", '["cat", 3]', '["cat", null]', '[""]', '["   "]'):
+            with self.subTest(metadata=value):
+                row.class_names = value
+                self.db.commit()
+                response = self.read_classes_without_side_effects(row)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["classes"], [])
+                self.assertIn("重新上传", response.json()["message"])
+
+    def test_force_reparse_rejected_even_for_super_admin(self):
+        row, _ = self.add_legacy_model()
+        self.make_member()
+        for user in (self.other, self.admin):
+            self.current_user = user
+            for value in (None, '["cat"]'):
+                row.class_names = value
+                self.db.commit()
+                response = self.read_classes_without_side_effects(row, "?force_reparse=true")
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("重新上传", response.json()["detail"])
+        response = self.read_classes_without_side_effects(row, "?force_reparse=invalid")
+        self.assertEqual(response.status_code, 422)
+
+    def test_cross_project_force_reparse_cannot_bypass_membership(self):
+        row, _ = self.add_legacy_model()
+        self.current_user = self.other
+        for query in ("", "?force_reparse=false", "?force_reparse=true"):
+            response = self.read_classes_without_side_effects(row, query)
+            self.assertEqual(response.status_code, 403)
 
     def test_missing_project_retains_not_found_status(self):
         response = self.upload(types.SimpleNamespace(id=99999))
