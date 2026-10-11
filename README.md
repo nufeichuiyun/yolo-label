@@ -3,6 +3,11 @@
 <p align="center">开源的一站式 YOLO 视觉平台：数据标注、AI 预标注、模型训练，直到 RK3588 边缘部署，全流程在浏览器里闭环，无需在多个工具间来回切换。</p>
 
 <p align="center">
+  <a href="https://github.com/nufeichuiyun/yolo-label">GitHub</a> ·
+  <a href="https://gitee.com/junzixing/yolo-label">Gitee</a>
+</p>
+
+<p align="center">
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python"></a>
   <a href="https://reactjs.org/"><img src="https://img.shields.io/badge/React-18.2+-blue.svg" alt="React"></a>
@@ -55,6 +60,8 @@
 <a id="start"></a>
 
 ## 🚀 快速开始
+
+源码仓库：[GitHub](https://github.com/nufeichuiyun/yolo-label) · [Gitee](https://gitee.com/junzixing/yolo-label)，主分支均为 `master`。下方示例使用 Gitee，也可将克隆地址替换为 `https://github.com/nufeichuiyun/yolo-label.git`。
 
 ### Linux / macOS
 
