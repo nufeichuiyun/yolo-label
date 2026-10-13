@@ -242,3 +242,11 @@ tar -xzf yolo-label-offline-*.tar.gz && cd yolo-label-offline-* && ./deploy.sh
 ## 🙏 致谢
 
 [YOLO / ultralytics](https://github.com/ultralytics/ultralytics) · [FastAPI](https://fastapi.tiangolo.com/) · [React](https://reactjs.org/) · [Ant Design](https://ant.design/)
+
+### 同源部署与 RKNN 开关
+
+前端构建时设置 `VITE_API_BASE_URL=/` 可让网页和 API 共用入口，适用于反向代理或 Windows 单端口部署。未设置时保留原有生产环境 8000 端口；也可指定完整 API 地址。
+
+未安装 RKNN worker 的环境，在后端设置 `RKNN_ENABLED=false`。网页会禁用转换选项，接口也会拒绝转换请求；默认保持启用以兼容现有 Compose 部署。
+
+完整训练包中的 `dataset/data.yaml` 使用相对路径，可解压到其他机器使用，不再引用训练服务器的临时目录。

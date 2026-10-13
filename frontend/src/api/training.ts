@@ -48,6 +48,7 @@ export interface BaseModelOption {
 }
 
 export interface BaseModelsResponse {
+  rknn_enabled: boolean
   models: BaseModelOption[]
   default: string
 }

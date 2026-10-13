@@ -7,6 +7,7 @@ import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
+import yaml
 
 TRAINING_OUTPUT_DIR = os.getenv("TRAINING_OUTPUT_DIR", "./training_output")
 TRAINING_ARCHIVES_DIR = os.getenv("TRAINING_ARCHIVES_DIR", os.path.join(TRAINING_OUTPUT_DIR, "archives"))
@@ -56,6 +57,12 @@ def create_training_archive(
         dataset_dst = os.path.join(archive_dir, "dataset")
         if os.path.exists(dataset_dir):
             shutil.copytree(dataset_dir, dataset_dst, dirs_exist_ok=True)
+            # 归档解压后以 data.yaml 所在目录为数据集根目录，不能保留训练临时路径。
+            data_yaml = Path(dataset_dst) / "data.yaml"
+            if data_yaml.is_file():
+                data = yaml.safe_load(data_yaml.read_text(encoding="utf-8"))
+                data.pop("path", None)
+                data_yaml.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
         # 2. 模型 -> model/
         model_dst = os.path.join(archive_dir, "model")

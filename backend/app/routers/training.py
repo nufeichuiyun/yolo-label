@@ -35,6 +35,10 @@ CELERY_TASK_KEY_PREFIX = "training_celery:"
 CELERY_TASK_TTL = 86400  # 24 小时
 
 
+def rknn_enabled() -> bool:
+    return os.getenv("RKNN_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
 def _get_latest_metrics(task_id: str) -> TrainingTaskMetrics | None:
     """从 Redis 读取训练实时指标"""
     try:
@@ -67,6 +71,9 @@ async def create_training_task(
         required_role=UserRole.PROJECT_ADMIN
     )
 
+    if task_data.convert_to_rknn and not rknn_enabled():
+        raise HTTPException(status_code=400, detail="当前部署未启用 RKNN 转换服务")
+
     # 校验：至少 1 个类别
     categories = db.query(Category).filter(Category.project_id == task_data.project_id).all()
     if len(categories) < 1:
@@ -95,7 +102,7 @@ async def create_training_task(
     imgsz = task_data.imgsz or 640
     batch = task_data.batch if task_data.batch is not None else 16  # 0=自动根据显存
     train_split = task_data.train_split or 0.8
-    convert_to_rknn = True if task_data.convert_to_rknn is None else task_data.convert_to_rknn
+    convert_to_rknn = rknn_enabled() if task_data.convert_to_rknn is None else task_data.convert_to_rknn
 
     task_id = str(uuid.uuid4())
     db_task = TrainingTask(
@@ -219,7 +226,7 @@ async def get_base_models(
         default = get_default_base_model(project.annotation_type.value)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return {"models": models, "default": default}
+    return {"models": models, "default": default, "rknn_enabled": rknn_enabled()}
 
 
 @router.get("/download/{task_id}")

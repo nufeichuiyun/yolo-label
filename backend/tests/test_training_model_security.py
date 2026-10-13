@@ -80,6 +80,20 @@ class TrainingModelSecurityTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return training_runner.run_training("stub", "stub-data", "stub-output", name, 1, 640, 1, 0, "cpu", annotation_type)
 
+    def test_disabled_rknn_is_reported_and_rejected_before_queue(self):
+        with patch.dict(os.environ, {"RKNN_ENABLED": "false"}):
+            response = self.fixture.client.get(f"/api/training/project/{self.fixture.project.id}/base-models")
+            self.assertFalse(response.json()["rknn_enabled"])
+            response = self.fixture.client.post("/api/training", json={
+                "project_id": self.fixture.project.id, "convert_to_rknn": True,
+            })
+            self.assertEqual(response.status_code, 400)
+            self.queue.delay.assert_not_called()
+            self.write_weight()
+            response = self.fixture.client.post("/api/training", json={"project_id": self.fixture.project.id})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertFalse(response.json()["convert_to_rknn"])
+
     def test_api_rejects_url_paths_unknown_and_mismatched_models_before_queue(self):
         self.write_weight()
         bad = ("https://example.invalid/model.pt", "/app/models/yolo11n.pt", "../yolo11n.pt", "uploads/2/private.pt", "yolo11x.pt", "yolo11n-seg.pt", "", "YOLO11N.PT")
