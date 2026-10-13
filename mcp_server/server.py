@@ -11,7 +11,7 @@ import httpx
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
@@ -37,6 +37,8 @@ def create_app(config, transport=None):
             @functools.wraps(fn)
             async def wrapped(*args, **kwargs):
                 target = kwargs.get('task_id', kwargs.get('project_id', ''))
+                if 'image_id' in kwargs:
+                    target = f"{target}/image/{kwargs['image_id']}"
                 bridge.audit(actor.get(), fn.__name__, 'started', target)
                 try:
                     result = await fn(*args, **kwargs)
@@ -66,6 +68,25 @@ def create_app(config, transport=None):
     async def check_dataset(project_id: Positive) -> dict[str, Any]:
         """统计每类样本、空标注、坐标异常。仅检查结构，不能判断是否漏标或类别语义正确。"""
         return await bridge.request('GET', f'/api/stats/project/{project_id}/quality')
+
+    @tool()
+    async def list_images(project_id: Positive, skip: Annotated[int, Field(ge=0)] = 0,
+                          limit: Annotated[int, Field(ge=1, le=100)] = 50) -> dict[str, Any]:
+        """分页列出图片 ID、尺寸和标注数，供分散抽样；空标注可能是正常负样本，不能直接判为漏标。"""
+        result = await bridge.request('GET', f'/api/images/project/{project_id}', params={'skip': skip, 'limit': limit})
+        fields = ('id', 'project_id', 'filename', 'width', 'height', 'is_annotated', 'annotation_count')
+        return {'total': result['total'], 'items': [{k: item[k] for k in fields if k in item} for item in result['items']]}
+
+    @tool()
+    async def inspect_image(project_id: Positive, image_id: Positive,
+                            view: Literal['both', 'original', 'overlay'] = 'both',
+                            max_size: Annotated[int, Field(ge=256, le=2048)] = 1600,
+                            crop: tuple[int, int, int, int] | None = None) -> CallToolResult:
+        """直接返回可见图片，默认原图预览＋编号标注图及坐标表。用于抽查漏标、错类、框或多边形合理性，不修改标注。
+        crop 是 EXIF 校正后原图像素 [左,上,右,下]，先裁剪再缩放；小缺陷请看局部。
+        发现疑点时记录 image_id、annotation id 和依据；需要结合类别定义判断，不能把抽查当作全量验收。
+        """
+        return await bridge.image_review(project_id, image_id, view, max_size, crop)
 
     @tool()
     async def list_training(project_id: Positive) -> dict[str, Any]:

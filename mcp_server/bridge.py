@@ -65,6 +65,33 @@ class Bridge:
                 raise ValueError(f'业务接口拒绝请求（HTTP {response.status_code}），请检查权限、数据和任务状态')
             return response.json()
 
+    async def image_review(self, project_id, image_id, view, max_size, crop):
+        from image_review import render_review
+
+        await self.request('GET', f'/api/projects/{project_id}')
+        info = await self.request('GET', f'/api/images/{image_id}')
+        if info['project_id'] != project_id:
+            raise ValueError('图片不属于指定项目')
+        categories = await self.request('GET', f'/api/categories/project/{project_id}')
+        annotations = await self.request('GET', f'/api/annotations/image/{image_id}')
+        # 流式限制解压后的响应体；不接受调用方路径或 URL，也不缓存私有图片。
+        limit = 40_000_000
+        async with self.client() as client:
+            for attempt in range(2):
+                async with client.stream('GET', f'/api/images/{image_id}/content', headers=await self.login(client)) as response:
+                    if response.status_code == 401 and attempt == 0:
+                        self.token = None
+                        continue
+                    if response.status_code != 200:
+                        raise ValueError(f'图片读取失败（HTTP {response.status_code}）')
+                    data = bytearray()
+                    async for block in response.aiter_bytes(chunk_size=65536):
+                        if len(data) + len(block) > limit:
+                            raise ValueError('图片文件超过 40 MB，请先压缩或切片')
+                        data.extend(block)
+                    break
+        return await asyncio.to_thread(render_review, bytes(data), info, categories, annotations, view, max_size, crop)
+
     async def task(self, task_id):
         task_id = str(uuid.UUID(task_id))
         return await self.request('GET', f'/api/training/task/{task_id}')

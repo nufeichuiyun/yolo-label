@@ -1,6 +1,6 @@
 # YOLO-Label MCP
 
-第一版提供 9 个工具：项目列表、项目概况、标注结构检查、训练列表、训练状态、提交训练、取消训练、训练报告、模型/完整包下载。Codex、Claude Code 共用服务；网页功能保留。
+提供 11 个工具：项目列表、项目概况、标注结构检查、图片列表、原图与标注预览、训练列表、训练状态、提交训练、取消训练、训练报告、模型/完整包下载。Codex、Claude Code 共用服务；网页功能保留。
 
 ## 部署
 
@@ -71,6 +71,23 @@ claude mcp list
 - 审计记录客户端、工具、目标、开始/结果和时间，不记录密码/令牌。仅提供标注读取检查，不开放批量修改标注或删除工程。
 - 服务使用一个进程。不要多副本共享此 SQLite 去重库；不要删除去重记录后重试旧提交。
 
+## 图片抽查
+
+先调用 `list_images(project_id, skip, limit)` 分页选图，再调用 `inspect_image(project_id, image_id)`。返回顺序是文字说明、原图预览、标注叠加图，图片使用 MCP 原生 `ImageContent`，HTTP 和 stdio 转接均可传给支持视觉输入的客户端。无需切到网页，也无需另行打开 URL。图片会传入所连接 AI 客户端的模型上下文，请按数据保密要求选用客户端。
+
+- `view` 可选 `both`（默认）、`original`、`overlay`；`max_size` 为预览最长边，默认 1600，范围 256–2048，不放大小图。
+- `crop: [左, 上, 右, 下]` 使用 EXIF 校正后的原图像素，先裁剪后缩放。例如 `[100, 200, 900, 800]`；看细小污渍或线头时应补看局部，不能只凭缩略图下结论。
+- 矩形和分割多边形均可绘制。图上 `#123 c4` 表示标注 ID 123、类别 ID 4；中文类别名、归一化坐标、原图像素外接框和异常说明在同一返回的文字表里。不同类别颜色固定，不依赖系统中文字体。
+- 几何错误会明确列出，不绘制成正常框；不会更改原始标注。EXIF 方向、数据库尺寸不一致会提示核对。图像只读，无图片磁盘缓存，每次重新校验项目及图片权限。
+- 单图最多 40 MB、4000 万像素、1000 条标注，支持静态 PNG/JPEG/BMP/WEBP；超限、损坏或动画明确拒绝。预览是 JPEG，已去除 EXIF 等元数据。
+- AI 能据图提出漏标、错类、框偏大偏小等疑点；仍需类别定义和有代表性的抽样。空标注可能是负样本，视觉抽查不等于全量验收。只提供审查，不自动修标注。
+
+调用示例：
+
+```json
+{"name":"inspect_image","arguments":{"project_id":1,"image_id":12,"view":"both","max_size":1600,"crop":[100,200,900,800]}}
+```
+
 ## 验证
 
 ```sh
@@ -79,4 +96,4 @@ claude mcp list
 python -m unittest discover -s backend/tests -v
 ```
 
-官方 SDK `mcp==1.30.0` 使用 MIT 许可证，本项目仍为 AGPL-3.0。协议/客户端参考：[Python SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v1.30.0)、[Codex MCP](https://developers.openai.com/codex/mcp)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)。
+官方 SDK `mcp==1.30.0` 使用 MIT 许可证，Pillow 使用 MIT-CMU 许可证，本项目仍为 AGPL-3.0。协议/客户端参考：[Python SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v1.30.0)、[Codex MCP](https://developers.openai.com/codex/mcp)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)。
