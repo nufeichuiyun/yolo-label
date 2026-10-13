@@ -1,0 +1,4 @@
+# -*- coding: utf-8 -*-
+# 官方 MCP Python SDK（MIT），独立虚拟环境，避免改变训练环境依赖。
+mcp==1.30.0
+httpx==0.28.1

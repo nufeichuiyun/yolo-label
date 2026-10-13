@@ -14,6 +14,7 @@ from app.services.training_archive_service import create_training_archive
 from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
 from app.trusted_models import validate_base_model
+from app.services.training_cancellation import cancelled
 
 try:
     import torch
@@ -74,6 +75,9 @@ def train_model_task(
         task = db.query(TrainingTask).filter(TrainingTask.task_id == task_id).first()
         if not task:
             raise ValueError(f"训练任务不存在: {task_id}")
+
+        if cancelled(task):
+            return {'message': '用户中断：跳过已取消的任务'}
 
         # 队列参数也不构成信任边界：按数据库中的真实项目与类型再次校验。
         if task.project_id != project_id:
@@ -169,6 +173,10 @@ def train_model_task(
                 capture_output=True,
                 text=True,
             )
+
+            db.refresh(task)
+            if cancelled(task):
+                return {'message': '用户中断：训练子进程已退出'}
 
             if proc.returncode != 0:
                 err_detail = f"训练子进程退出码: {proc.returncode}"

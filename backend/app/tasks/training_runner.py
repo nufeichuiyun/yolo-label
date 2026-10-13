@@ -5,6 +5,8 @@
 import json
 import os
 import sys
+import time
+from app.services.training_cancellation import check_cancelled
 from app.trusted_models import validate_base_model
 
 
@@ -67,6 +69,7 @@ def run_training(
                 print(f"[training] Redis 写入指标异常: {e}", flush=True)
 
         def on_fit_epoch_end(trainer):
+            check_cancelled(task_id)
             try:
                 current = getattr(trainer, "epoch", 0) + 1
                 total = getattr(trainer, "epochs", epochs)
@@ -111,8 +114,12 @@ def run_training(
                 print(f"[training] 回调异常: {e}", flush=True)
 
         _last_batch_progress = [0]
+        _last_cancel_check = [0.0]
 
         def on_train_batch_end(trainer):
+            if time.monotonic() - _last_cancel_check[0] >= 1:
+                check_cancelled(task_id)
+                _last_cancel_check[0] = time.monotonic()
             try:
                 epoch = getattr(trainer, "epoch", 0)
                 batch_i = getattr(trainer, "batch_i", 0)
@@ -130,6 +137,7 @@ def run_training(
         model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
         model.add_callback("on_train_batch_end", on_train_batch_end)
 
+        check_cancelled(task_id)
         model.train(
             data=data_yaml_path,
             epochs=epochs,

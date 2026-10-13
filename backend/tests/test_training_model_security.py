@@ -60,6 +60,7 @@ class TrainingModelSecurityTests(unittest.TestCase):
         fake.YOLO = self.yolo
         self.stack.enter_context(patch.dict(sys.modules, {"ultralytics": fake}))
         self.stack.enter_context(patch("app.task_heartbeat.mark_alive"))
+        self.stack.enter_context(patch.object(training_runner, "check_cancelled"))
 
     def tearDown(self):
         self.stack.close()
@@ -177,6 +178,29 @@ class TrainingModelSecurityTests(unittest.TestCase):
         arguments = process.call_args.args[0]
         self.assertEqual(arguments[arguments.index("--annotation-type") + 1], "detection")
         self.assertEqual(arguments[arguments.index("--base-model") + 1], "yolo11n.pt")
+
+    def test_cancelled_queued_task_does_not_restart(self):
+        self.fixture.train_task.status = "failed"
+        self.fixture.train_task.error_message = "用户中断"
+        self.db.commit()
+        with patch.object(worker, "prepare_dataset") as dataset, patch.object(worker.subprocess, "run") as process:
+            self.run_worker("yolo11n.pt")
+        dataset.assert_not_called()
+        process.assert_not_called()
+        self.assertEqual(self.fixture.train_task.status, "failed")
+
+    def test_cancel_during_subprocess_does_not_publish_model(self):
+        self.write_weight()
+        def finish(*args, **kwargs):
+            self.fixture.train_task.status = "failed"
+            self.fixture.train_task.error_message = "用户中断"
+            self.db.commit()
+            return types.SimpleNamespace(returncode=1)
+        with patch.object(worker, "prepare_dataset", return_value=("fixture-data", 8, 2)), patch.object(worker.subprocess, "run", side_effect=finish), patch.object(worker, "create_training_archive") as archive:
+            self.run_worker("yolo11n.pt")
+        archive.assert_not_called()
+        self.assertEqual(self.fixture.train_task.status, "failed")
+        self.assertIsNone(self.fixture.train_task.output_model_path)
 
     def test_completed_redelivery_skips_missing_base_without_downgrade(self):
         output = self.root / "trained_1_1_best.pt"

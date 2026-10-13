@@ -92,3 +92,20 @@ async def get_task_stats(
         total_images=total_images,
         annotated_images=annotated_images
     )
+
+
+@router.get("/project/{project_id}/quality")
+async def get_project_quality(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """仅项目管理员可检查整项目标注。"""
+    if current_user.role not in (UserRole.PROJECT_ADMIN, UserRole.SUPER_ADMIN):
+        raise HTTPException(status_code=403, detail="需要项目管理员权限")
+    project = check_project_permission(project_id, current_user, db, required_role=UserRole.PROJECT_ADMIN)
+    from app.services.dataset_quality import summarize
+    categories = db.query(Category).filter(Category.project_id == project_id).all()
+    images = db.query(Image.id, Image.is_annotated).filter(Image.project_id == project_id).all()
+    annotations = db.query(Annotation).join(Image).filter(Image.project_id == project_id).yield_per(1000)
+    return summarize(categories, images, annotations, project.annotation_type.value)

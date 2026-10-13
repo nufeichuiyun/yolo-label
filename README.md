@@ -250,3 +250,7 @@ tar -xzf yolo-label-offline-*.tar.gz && cd yolo-label-offline-* && ./deploy.sh
 未安装 RKNN worker 的环境，在后端设置 `RKNN_ENABLED=false`。网页会禁用转换选项，接口也会拒绝转换请求；默认保持启用以兼容现有 Compose 部署。
 
 完整训练包中的 `dataset/data.yaml` 使用相对路径，可解压到其他机器使用，不再引用训练服务器的临时目录。
+
+### AI 工具连接
+
+[第一版 MCP 接入说明](mcp_server/README.md)：Codex / Claude Code 可查询数据、提交与取消训练、读取指标及下载产物。独立部署，复用项目权限；不开放批量修改标注。
