@@ -13,6 +13,7 @@ import subprocess
 
 from app.celery_app import celery_app
 from app.models import TrainingTask
+from app.trusted_models import supports_rknn
 from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
 
@@ -53,6 +54,8 @@ def convert_to_rknn_task(self, training_task_id: int):
     mark_alive(f"rknn:{training_task_id}", ttl=3600)
 
     try:
+        if not supports_rknn(task.base_model):
+            raise RuntimeError("当前 RKNN 转换器仅支持 YOLO11，不能转换 YOLO26")
         if not task.output_model_path:
             raise RuntimeError("训练任务无输出模型，无法转换")
 

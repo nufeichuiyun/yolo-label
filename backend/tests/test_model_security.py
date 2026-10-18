@@ -80,6 +80,7 @@ class ModelSecurityTests(unittest.TestCase):
         baseline = self.root / "yolo11n.pt"
         baseline.write_bytes(b"trusted baseline")
         first = self.upload(self.projects[0], b"project one").json()
+        self.assertEqual(first["model_type"], "yolo")  # 不把改名后的 YOLO26 权重误记为 YOLO11。
         second = self.upload(self.projects[1], b"project two").json()
         third = self.upload(self.projects[0], b"another upload", name="other name").json()
         paths = [item["filename"] for item in (first, second, third)]

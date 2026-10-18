@@ -64,3 +64,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\download_yolo_models.ps1
 | 变量        | 说明                     |
 |-------------|--------------------------|
 | `MODELS_DIR`| 模型输出目录，默认 `./models` |
+
+## YOLO26 模型下载
+
+使用主后端的 Python 3.11+ 环境，脚本仅依赖标准库。默认下载检测和实例分割的 n/s/m/l/x 共 10 个官方权重。来源固定为 Ultralytics assets v8.4.0，SHA256 固定在 `backend/app/trusted_models.py`，校验失败不覆盖原文件，也不留下不完整权重。YOLO26 权重不放进 Git 历史。
+
+```sh
+python scripts/download_yolo26_models.py
+# 只下载两个轻量模型，或指定部署目录：
+python scripts/download_yolo26_models.py yolo26n.pt yolo26n-seg.pt --output-dir /path/to/models
+```
+
+安装主后端 `requirements.txt` 的 Ultralytics 8.4.176 后，可在训练窗口或 MCP 的 `base_model` 参数选择对应模型。只下载部分权重时，其他尺寸虽在列表中，但提交训练会提示权重缺失。默认仍为 YOLO11；现有 RKNN 转换器不支持 YOLO26。

@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import importlib
 import io
+import json
 import os
 import sys
 import types
@@ -135,6 +136,72 @@ class TrainingModelSecurityTests(unittest.TestCase):
             self.assertEqual(values, list(allowed_base_models(kind)))
             self.assertTrue(all(value in MODEL_SHA256 and "11x" not in value for value in values))
 
+    def test_yolo26_detection_and_segmentation_reach_loader_with_correct_type(self):
+        for kind, name in ((AnnotationType.DETECTION, "yolo26n.pt"), (AnnotationType.SEGMENTATION, "yolo26n-seg.pt")):
+            self.fixture.project.annotation_type = kind
+            self.db.commit()
+            path = self.write_weight(name)
+            response = self.submit(name)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.queue.delay.call_args.kwargs["base_model"], name)
+            self.assertEqual(self.run_stub_loader(name, kind.value), 0)
+            self.yolo.assert_called_with(str(path.resolve()))
+            self.assertEqual(self.submit("yolo26n-seg.pt" if kind == AnnotationType.DETECTION else "yolo26n.pt").status_code, 400)
+
+    def test_yolo26_rknn_rejected_and_omitted_flag_defaults_off(self):
+        self.write_weight("yolo26n.pt")
+        with patch.dict(os.environ, {"RKNN_ENABLED": "true"}):
+            response = self.fixture.client.post("/api/training", json={
+                "project_id": self.fixture.project.id, "base_model": "yolo26n.pt", "convert_to_rknn": True,
+            })
+            self.assertEqual(response.status_code, 400)
+            self.queue.delay.assert_not_called()
+            response = self.fixture.client.post("/api/training", json={
+                "project_id": self.fixture.project.id, "base_model": "yolo26n.pt",
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertFalse(response.json()["convert_to_rknn"])
+        options = training_service.get_available_base_models("detection")
+        self.assertEqual(len(options), 9)
+        self.assertEqual(sum(m["rknn_supported"] for m in options), 4)
+        self.assertEqual([m for m in options if m["value"] == "yolo26x.pt"][0]["label"], "YOLO26 XLarge")
+
+    def test_yolo26_tampering_and_worker_rknn_blocked_before_training(self):
+        self.write_weight("yolo26n.pt").write_bytes(b"tampered")
+        self.assertEqual(self.submit("yolo26n.pt").status_code, 400)
+        self.assertEqual(self.run_stub_loader("yolo26n.pt"), 1)
+        self.yolo.assert_not_called()
+        self.write_weight("yolo26n.pt")
+        self.fixture.train_task.convert_to_rknn = True
+        self.db.commit()
+        with patch.object(worker, "prepare_dataset") as dataset, patch.object(worker.subprocess, "run") as process:
+            with self.assertRaisesRegex(ValueError, "YOLO26"):
+                self.run_worker("yolo26n.pt")
+        dataset.assert_not_called()
+        process.assert_not_called()
+
+    def test_final_validation_callback_does_not_report_an_extra_epoch(self):
+        self.write_weight("yolo26n.pt")
+        def final_validation(**kwargs):
+            callbacks = dict(call.args for call in self.yolo.return_value.add_callback.call_args_list)
+            callbacks["on_fit_epoch_end"](types.SimpleNamespace(epoch=1, epochs=1, tloss=None, metrics={}, lr={}))
+        self.yolo.return_value.train.side_effect = final_validation
+        with patch("redis.from_url") as redis, patch("app.database.SessionLocal"):
+            self.assertEqual(self.run_stub_loader("yolo26n.pt"), 0)
+            metrics = json.loads(redis.return_value.setex.call_args.args[2])
+            self.assertEqual(metrics["epoch"], 1)
+            self.assertEqual(metrics["progress"], 95)
+
+    def test_converter_rejects_yolo26_before_subprocess(self):
+        converter = importlib.import_module("app.tasks.rknn_conversion")
+        self.fixture.train_task.base_model = "yolo26n.pt"
+        self.db.commit()
+        with patch.object(converter, "mark_alive"), patch.object(converter.subprocess, "run") as process:
+            result = converter.convert_to_rknn_task.run.__func__(types.SimpleNamespace(db=self.db), self.fixture.train_task.id)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("YOLO26", result["reason"])
+        process.assert_not_called()
+
     def test_runner_rejects_all_unsafe_sources_before_yolo(self):
         self.write_weight()
         for value, kind in (("https://example.invalid/model.pt", "detection"), ("../yolo11n.pt", "detection"), (str(self.root / "yolo11n.pt"), "detection"), ("yolo11n.pt", "segmentation"), ("yolo11n.pt", "keypoint"), ("yolo11s.pt", "detection")):
@@ -233,6 +300,8 @@ class BundledWeightsIntegrityTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2] / "models"
         for kind in ("detection", "segmentation"):
             for name in allowed_base_models(kind):
+                if not name.startswith("yolo11"):
+                    continue  # YOLO26 由校验脚本单独安装，不随 Git 分发。
                 with self.subTest(name=name):
                     self.assertEqual(validate_base_model(name, kind, str(root)), root / name)
 

@@ -11,7 +11,7 @@
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python"></a>
   <a href="https://reactjs.org/"><img src="https://img.shields.io/badge/React-18.2+-blue.svg" alt="React"></a>
-  <a href="https://github.com/ultralytics/ultralytics"><img src="https://img.shields.io/badge/YOLO-11-green.svg" alt="YOLO11"></a>
+  <a href="https://github.com/ultralytics/ultralytics"><img src="https://img.shields.io/badge/YOLO-11%20%2F%2026-green.svg" alt="YOLO11 / YOLO26"></a>
   <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.104+-009688.svg" alt="FastAPI"></a>
 </p>
 
@@ -34,11 +34,11 @@
 
 传统工作流要在标注工具、脚本、训练框架之间反复横跳。YOLO-Label 把这一切整合进一个 Web 平台：
 
-- **标注即训练** — 标完直接在平台内训练 YOLO11，告别格式转换与环境折腾
-- **AI 提效** — 内置 YOLO11 预标注，自动生成初版标注，人工只需微调
+- **标注即训练** — 标完直接在平台内训练 YOLO11 / YOLO26，告别格式转换与环境折腾
+- **AI 提效** — 支持 YOLO11 / YOLO26 预标注，自动生成初版标注，人工只需微调
 - **开箱即用** — Docker 一键部署，支持 GPU 加速，5 分钟即可开始标注
 - **团队协作** — 任务包分配 + 三级权限，适合 1~15 人团队并行作业
-- **直达边缘** — 训练完一键转成 RK3588 的 `.rknn`（INT8 量化），打包即可部署
+- **直达边缘** — YOLO11 训练后可转成 RK3588 的 `.rknn`（INT8 量化）；YOLO26 暂不支持此转换
 
 <a id="features"></a>
 
@@ -48,9 +48,9 @@
 |------|------|
 | 🟦 **目标检测标注** | 矩形框标注，快捷键切换类别，支持 YOLO 格式导入导出 |
 | 🔷 **实例分割标注** | 多边形标注，顶点增删、右键操作，精细勾勒目标轮廓 |
-| 🤖 **AI 预标注** | 用已有 YOLO11 模型自动为图片生成标注，大幅减少手工量 |
-| 🧠 **一键训练** | 平台内直接训练 YOLO11，实时查看训练进度与指标曲线 |
-| 📦 **RKNN 转换（RK3588）** | 训练后自动把 `.pt` 转成 INT8 量化的 `.rknn`，打包 PT+RKNN 一键下载 |
+| 🤖 **AI 预标注** | 用已有 YOLO11 / YOLO26 模型自动为图片生成标注，大幅减少手工量 |
+| 🧠 **一键训练** | 平台内直接训练 YOLO11 / YOLO26，实时查看训练进度与指标曲线 |
+| 📦 **RKNN 转换（RK3588）** | YOLO11 训练后可转成 INT8 量化的 `.rknn`，打包 PT+RKNN 下载；YOLO26 暂不支持 |
 | 🔁 **项目导出与导入** | 图片 + 类别 + 标注完整打包，支持跨实例迁移与备份 |
 | 👥 **权限与协作** | 超级管理员 / 项目管理员 / 标注员三级权限，任务包分配与进度追踪 |
 | 🐳 **Docker 部署** | 完全容器化，支持 GPU / CPU / 离线部署，无环境依赖 |
@@ -127,7 +127,10 @@ scripts\yolo-label.bat
 ```
 
 1. **前置条件**：项目内至少 10 张已标注图片 + 1 个类别
-2. **选择基础模型**：YOLO11 全系列（n / s / m / l / x），按精度-速度权衡选择
+2. **选择基础模型**：YOLO11（n / s / m / l）或 YOLO26（n / s / m / l / x），按精度-速度权衡选择
+
+   YOLO26 检测与实例分割权重需先运行 `python scripts/download_yolo26_models.py`（Python 3.11+，下载后核验固定 SHA256）。默认仍选 YOLO11，便于对比。YOLO26 支持训练、PT 下载及预标注；当前独立 RKNN 转换器仅支持 YOLO11，YOLO26 转换暂不开放。官方说明：[YOLO26](https://docs.ultralytics.com/models/yolo26/)。
+
 3. **配置参数**：训练轮数、批次大小、图片尺寸等，均有合理默认值
 4. **后台执行**：训练跑在 Celery 后台，关闭浏览器也不中断
 5. **实时监控**：过程中查看 loss、mAP 等指标变化
@@ -135,8 +138,8 @@ scripts\yolo-label.bat
 
 | 项目类型 | 训练模式 | 基础模型示例 |
 |---------|---------|------------|
-| 目标检测 | Detection | yolo11n.pt / yolo11s.pt |
-| 实例分割 | Segmentation | yolo11n-seg.pt / yolo11s-seg.pt |
+| 目标检测 | Detection | yolo11n.pt / yolo26n.pt |
+| 实例分割 | Segmentation | yolo11n-seg.pt / yolo26n-seg.pt |
 
 系统按项目类型自动选择对应基础模型，无需手动切换。
 
@@ -168,7 +171,7 @@ scripts\yolo-label.bat
 
 ## 🤖 AI 预标注
 
-1. 在 **模型管理** 页上传 YOLO11 模型（`.pt`）
+1. 在 **模型管理** 页上传 YOLO11 / YOLO26 模型（`.pt`）
 2. 进入项目详情，点击 **AI 预标注**，选择模型和类别映射
 3. 任务后台执行，完成后查看并修正自动生成的标注
 
@@ -205,7 +208,7 @@ tar -xzf yolo-label-offline-*.tar.gz && cd yolo-label-offline-* && ./deploy.sh
 |------|------|
 | 前端 | React 18 + TypeScript + Ant Design + Fabric.js |
 | 后端 | FastAPI + PostgreSQL 15 + Redis |
-| AI | YOLO11 (ultralytics) + PyTorch 2.7（cu128，支持 Blackwell GPU）|
+| AI | YOLO11 / YOLO26 (ultralytics 8.4.176) + PyTorch 2.7（cu128，支持 Blackwell GPU）|
 | 边缘部署 | RKNN Toolkit2（PT→ONNX→RKNN，RK3588）|
 | 任务队列 | Celery + Redis（训练/预标注走默认队列，RKNN 转换走独立 `rknn` 队列）|
 | 部署 | Docker + Docker Compose |

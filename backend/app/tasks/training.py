@@ -13,7 +13,7 @@ from app.services.training_service import prepare_dataset, collect_calibration_i
 from app.services.training_archive_service import create_training_archive
 from app.task_heartbeat import mark_alive
 from app.tasks._db_task import DatabaseTask
-from app.trusted_models import validate_base_model
+from app.trusted_models import validate_base_model, supports_rknn
 from app.services.training_cancellation import cancelled
 
 try:
@@ -104,6 +104,8 @@ def train_model_task(
 
         # 已产出模型的重复投递无需再次加载基础权重；仅真正训练前验证。
         validate_base_model(base_model, project.annotation_type.value, MODEL_DIR)
+        if task.convert_to_rknn and not supports_rknn(base_model):
+            raise ValueError("当前 RKNN 转换器仅支持 YOLO11，不能转换 YOLO26")
 
         task.status = "running"
         task.progress = 0

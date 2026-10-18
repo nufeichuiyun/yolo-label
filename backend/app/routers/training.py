@@ -26,7 +26,7 @@ from app.services.training_service import (
 from app.services.training_archive_service import TRAINING_ARCHIVES_DIR
 from app.tasks.training import train_model_task, TRAINING_METRICS_KEY_PREFIX
 from app.celery_app import celery_app
-from app.trusted_models import validate_base_model
+from app.trusted_models import validate_base_model, supports_rknn
 
 router = APIRouter(prefix="/api/training", tags=["训练"])
 MODEL_DIR = os.getenv("MODEL_DIR", "./models")
@@ -98,11 +98,13 @@ async def create_training_task(
         validate_base_model(base_model, project.annotation_type.value, MODEL_DIR)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    if task_data.convert_to_rknn and not supports_rknn(base_model):
+        raise HTTPException(status_code=400, detail="当前 RKNN 转换器仅支持 YOLO11；YOLO26 请关闭转换后训练并下载 PT 模型")
     epochs = task_data.epochs or 100
     imgsz = task_data.imgsz or 640
     batch = task_data.batch if task_data.batch is not None else 16  # 0=自动根据显存
     train_split = task_data.train_split or 0.8
-    convert_to_rknn = rknn_enabled() if task_data.convert_to_rknn is None else task_data.convert_to_rknn
+    convert_to_rknn = (rknn_enabled() and supports_rknn(base_model)) if task_data.convert_to_rknn is None else task_data.convert_to_rknn
 
     task_id = str(uuid.uuid4())
     db_task = TrainingTask(

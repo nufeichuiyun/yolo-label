@@ -9,7 +9,7 @@ import { exportApi } from '../api/export'
 import { categoriesApi, Category } from '../api/categories'
 import { modelsApi, Model } from '../api/models'
 import { preannotationApi, PreAnnotationTask } from '../api/preannotation'
-import { trainingApi, TrainingTask } from '../api/training'
+import { trainingApi, TrainingTask, BaseModelOption } from '../api/training'
 import { tasksApi, Task } from '../api/tasks'
 import { usersApi, UserListResponse } from '../api/users'
 import { useAuth } from '../contexts/AuthContext'
@@ -83,9 +83,10 @@ export default function ProjectDetail() {
   const [trainingFloatVisible, setTrainingFloatVisible] = useState(true)  // 训练进度浮层是否展开（关闭仅最小化，训练继续）
   const [trainingPollingInterval, setTrainingPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null)
   const [rknnEnabled, setRknnEnabled] = useState(false)
-  const [baseModels, setBaseModels] = useState<{ value: string; label: string }[]>([])
+  const [baseModels, setBaseModels] = useState<BaseModelOption[]>([])
   const [defaultBaseModel, setDefaultBaseModel] = useState<string>('')
   const [trainingConfig, setTrainingConfig] = useState({ base_model: '', epochs: 100, imgsz: 640, batch: 16, train_split: 0.8, convert_to_rknn: false })
+  const selectedModelSupportsRknn = baseModels.find(model => model.value === (trainingConfig.base_model || defaultBaseModel))?.rknn_supported === true
   const [startingTraining, setStartingTraining] = useState(false)
   
   const { user } = useAuth()
@@ -261,7 +262,7 @@ export default function ProjectDetail() {
       setRknnEnabled(data.rknn_enabled === true)
       setBaseModels(data.models)
       setDefaultBaseModel(data.default)
-      setTrainingConfig(prev => ({ ...prev, base_model: data.default, convert_to_rknn: data.rknn_enabled === true }))
+      setTrainingConfig(prev => ({ ...prev, base_model: data.default, convert_to_rknn: data.rknn_enabled === true && data.models.find(model => model.value === data.default)?.rknn_supported === true }))
     } catch (error) {
       console.error('加载基础模型失败:', error)
     }
@@ -1317,7 +1318,7 @@ export default function ProjectDetail() {
               <Select
                 style={{ width: '100%' }}
                 value={trainingConfig.base_model || defaultBaseModel}
-                onChange={(v) => setTrainingConfig(prev => ({ ...prev, base_model: v }))}
+                onChange={(v) => setTrainingConfig(prev => ({ ...prev, base_model: v, convert_to_rknn: prev.convert_to_rknn && rknnEnabled && baseModels.find(model => model.value === v)?.rknn_supported === true }))}
                 options={baseModels}
                 placeholder="选择基础模型"
               />
@@ -1388,14 +1389,14 @@ export default function ProjectDetail() {
             </div>
             <div>
               <Checkbox
-                disabled={!rknnEnabled}
+                disabled={!rknnEnabled || !selectedModelSupportsRknn}
                 checked={trainingConfig.convert_to_rknn}
                 onChange={(e) => setTrainingConfig(prev => ({ ...prev, convert_to_rknn: e.target.checked }))}
               >
-                {rknnEnabled ? '训练完成后转换为 RKNN（RK3588，INT8 量化）' : 'RKNN 转换（当前未配置转换服务）'}
+                {!selectedModelSupportsRknn ? 'RKNN 转换（当前模型不支持）' : rknnEnabled ? '训练完成后转换为 RKNN（RK3588，INT8 量化）' : 'RKNN 转换（当前未配置转换服务）'}
               </Checkbox>
               <div style={{ marginTop: 4, fontSize: '12px', color: '#999' }}>
-                {rknnEnabled ? '自动把训练得到的 .pt 转换为可部署到 RK3588 的 .rknn，使用验证集（不足时从训练集补足）作为量化校准图片。转换在后台进行，完成后可下载 PT+RKNN 包。' : '当前可训练并下载 PT 模型；部署到 RK3588 时需另行配置转换服务。'}
+                {!selectedModelSupportsRknn ? '现有转换器仅支持 YOLO11。YOLO26 可训练、预标注并下载 PT 模型，RKNN 部署需另行适配。' : rknnEnabled ? '自动把训练得到的 .pt 转换为可部署到 RK3588 的 .rknn，使用验证集（不足时从训练集补足）作为量化校准图片。转换在后台进行，完成后可下载 PT+RKNN 包。' : '当前可训练并下载 PT 模型；部署到 RK3588 时需另行配置转换服务。'}
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>

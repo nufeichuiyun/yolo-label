@@ -71,8 +71,9 @@ def run_training(
         def on_fit_epoch_end(trainer):
             check_cancelled(task_id)
             try:
-                current = getattr(trainer, "epoch", 0) + 1
-                total = getattr(trainer, "epochs", epochs)
+                total = max(1, getattr(trainer, "epochs", epochs))
+                # 最终验证也会调用此回调，epoch 可能已等于总轮数。
+                current = min(getattr(trainer, "epoch", 0) + 1, total)
                 progress = int(5 + 90 * current / total)
                 _update_progress(current, progress)
                 mark_alive(task_id)  # 每个 epoch 续期心跳

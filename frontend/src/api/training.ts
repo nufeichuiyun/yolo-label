@@ -43,6 +43,7 @@ export interface TrainingTaskCreate {
 }
 
 export interface BaseModelOption {
+  rknn_supported: boolean
   value: string
   label: string
 }

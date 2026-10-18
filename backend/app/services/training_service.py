@@ -7,7 +7,7 @@ import shutil
 import random
 import tempfile
 import yaml
-from app.trusted_models import allowed_base_models, default_base_model
+from app.trusted_models import allowed_base_models, default_base_model, supports_rknn
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -222,10 +222,13 @@ def get_default_base_model(annotation_type: str) -> str:
 
 
 def get_available_base_models(annotation_type: str) -> List[dict]:
-    """只列出发行包中已核验的 n/s/m/l 权重；不自动下载未收录的 x 权重。"""
-    labels = ("Nano (最快)", "Small", "Medium", "Large")
+    """返回固定信任清单及当前转换器能力；权重由管理员预下载。"""
+    labels = dict(n="Nano (最快)", s="Small", m="Medium", l="Large", x="XLarge")
     suffix = " Seg" if annotation_type == "segmentation" else ""
-    return [
-        {"value": name, "label": f"YOLO11 {label}{suffix}"}
-        for name, label in zip(allowed_base_models(annotation_type), labels)
-    ]
+    result = []
+    for name in allowed_base_models(annotation_type):
+        stem = name.split(".")[0].removesuffix("-seg")
+        family, size = stem[:-1].upper(), stem[-1]
+        result.append({"value": name, "label": f"{family} {labels[size]}{suffix}",
+                       "rknn_supported": supports_rknn(name)})
+    return result

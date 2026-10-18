@@ -91,7 +91,7 @@ async def upload_model(
                 from ultralytics import YOLO
                 model = YOLO(filepath)
                 
-                # YOLO11/YOLOv8的类别信息在model.names中（字典格式，key是class_id，value是class_name）
+                # Ultralytics YOLO 的类别信息在model.names中（字典格式，key是class_id，value是class_name）
                 if hasattr(model, 'names') and model.names:
                     names_dict = model.names
                     # 将字典转换为有序列表
@@ -130,7 +130,7 @@ async def upload_model(
             filename=safe_filename,
             filepath=relative_path,
             file_size=file_size,
-            model_type="yolo11",
+            model_type="yolo",  # 上传文件可能来自 YOLO11、YOLO26 等，不凭文件名猜版本。
             description=description,
             class_names=class_names,
             is_default=False,
