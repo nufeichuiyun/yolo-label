@@ -41,7 +41,7 @@ class Bridge:
             db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (time.time(), client, tool, status, str(target)))
 
     def client(self):
-        return httpx.AsyncClient(base_url=self.config['api_url'], timeout=30, transport=self.transport, follow_redirects=False)
+        return httpx.AsyncClient(base_url=self.config['api_url'], timeout=30, transport=self.transport, follow_redirects=False, trust_env=False)
 
     async def login(self, client):
         if not self.token or time.time() > self.token_until:

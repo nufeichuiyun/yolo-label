@@ -2,6 +2,7 @@ import asyncio
 import base64
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -218,3 +219,12 @@ class ServerTests(unittest.TestCase):
             self.assertTrue(self.rpc('inspect_image', args)['isError'])
         self.picture = b'X' * 40_000_001
         self.assertTrue(self.rpc('inspect_image', args)['isError'])
+
+    def test_backend_connection_ignores_unrelated_system_proxy(self):
+        from unittest.mock import patch
+        proxy = 'http://127.0.0.1:1'
+        with patch.dict(os.environ, {'HTTP_PROXY': proxy, 'HTTPS_PROXY': proxy, 'ALL_PROXY': proxy, 'NO_PROXY': '',
+                                     'http_proxy': proxy, 'https_proxy': proxy, 'all_proxy': proxy, 'no_proxy': ''}):
+            result = self.rpc('list_projects', {})
+        self.assertFalse(result.get('isError'), result)
+        self.assertEqual(result['structuredContent']['total'], 1)
